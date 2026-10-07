@@ -4,11 +4,11 @@ NotiHistory — приложение для Android на Flutter с нативн
 
 ## Скачать
 
-Чтобы установить приложение, откройте раздел релизов:
+Чтобы установить приложение, откройте страницу скачивания:
 
-[![Скачать APK](https://img.shields.io/badge/Скачать_APK-7760DB?style=for-the-badge&logo=android&logoColor=white)](https://github.com/mu1zi47/NotiHistory/releases)
+[![Скачать APK](https://img.shields.io/badge/Скачать_APK-7760DB?style=for-the-badge&logo=android&logoColor=white)](https://notihistory.vercel.app/#download)
 
-Выберите файл `.apk` в **Assets** нужного релиза. Если APK ещё не опубликован, его можно собрать из исходников по инструкции ниже.
+Скачайте APK со страницы и откройте его на Android. Приложение также можно собрать из исходников по инструкции ниже.
 
 Перед установкой:
 
