@@ -85,7 +85,7 @@ flutter build apk --release
 
 Готовые файлы находятся в `build/app/outputs/flutter-apk/`.
 
-Текущая release-сборка использует debug-подпись. Для публикации в магазине нужен собственный ключ подписи и уникальный `applicationId`.
+Application ID: `uz.mu1zi47.notihistory`. Release APK подписывается отдельным ключом из `android/key.properties`. Ключ и пароли не включаются в Git; храните их резервную копию для выпуска обновлений.
 
 ## Разрешения и настройка устройства
 

@@ -1,4 +1,4 @@
-package com.example.noti_history
+package uz.mu1zi47.notihistory
 
 import android.content.ContentValues
 import android.content.Context
