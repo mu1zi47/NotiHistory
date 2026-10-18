@@ -1,3 +1,6 @@
+import 'package:noti_history/core/theme/app_theme.dart';
+import 'package:noti_history/core/l10n/app_strings.dart';
+
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -59,27 +62,37 @@ class _NotificationImageState extends State<NotificationImage> {
     future: _image,
     builder: (context, snapshot) {
       final bytes = snapshot.data;
-      if (bytes == null || bytes.isEmpty) return const SizedBox.shrink();
+      if (bytes == null || bytes.isEmpty) return SizedBox.shrink();
       return Padding(
-        padding: const EdgeInsets.only(top: 12),
-        child: Semantics(
-          label: 'Изображение из уведомления',
-          button: true,
-          child: InkWell(
-            onTap: () => _show(bytes),
-            borderRadius: BorderRadius.circular(12),
-            child: Opacity(
-              opacity: _viewing ? 0 : 1,
-              child: ClipRRect(
-                key: _previewKey,
+        padding: EdgeInsets.only(top: 12),
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: Opacity(
+            opacity: _viewing ? 0 : 1,
+            child: Semantics(
+              label: tr(context, 'Изображение из уведомления'),
+              button: true,
+              child: InkWell(
+                onTap: () => _show(bytes),
                 borderRadius: BorderRadius.circular(12),
-                child: Image.memory(
-                  bytes,
-                  width: double.infinity,
-                  height: widget.compact ? 150 : 280,
-                  fit: BoxFit.contain,
-                  filterQuality: FilterQuality.high,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                child: Container(
+                  key: _previewKey,
+                  constraints: BoxConstraints(
+                    maxHeight: widget.compact ? 150 : 280,
+                  ),
+                  foregroundDecoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: ui(context).divider),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.memory(
+                      bytes,
+                      fit: BoxFit.contain,
+                      filterQuality: FilterQuality.high,
+                      errorBuilder: (_, _, _) => SizedBox.shrink(),
+                    ),
+                  ),
                 ),
               ),
             ),

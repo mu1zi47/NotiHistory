@@ -8,11 +8,49 @@ import android.os.Bundle
 
 /** Platform-only integration tests: run on an emulator, no third-party test runtime. */
 class HistoryInstrumentation : Instrumentation() {
-    override fun onCreate(arguments: Bundle?) { super.onCreate(arguments); start() }
+    private var inspectSample = false
+    private var inspectMarker = ""
+    override fun onCreate(arguments: Bundle?) {
+        super.onCreate(arguments)
+        inspectSample = arguments?.getString("inspectSample") == "true"
+        inspectMarker = arguments?.getString("inspectMarker").orEmpty()
+        start()
+    }
     override fun onStart() {
         val databaseName = "history-instrumentation.db"
         val results = Bundle()
         try {
+            if (inspectSample) {
+                val rows = org.json.JSONArray()
+                SQLiteDatabase.openDatabase(targetContext.getDatabasePath("notification_history.db").absolutePath, null, SQLiteDatabase.OPEN_READONLY).use { db ->
+                    db.rawQuery("SELECT id, body, posted_at, saved_at FROM history WHERE package_name = ? AND ((? = '' AND instr(lower(title), 'muizxo') > 0) OR (? != '' AND instr(body, ?) > 0)) ORDER BY id DESC LIMIT 15", arrayOf("org.telegram.messenger", inspectMarker, inspectMarker, inspectMarker)).use { cursor ->
+                        while (cursor.moveToNext()) {
+                            val body = cursor.getString(1)
+                            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(body.toByteArray()).joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+                            rows.put(org.json.JSONObject().put("id", cursor.getLong(0)).put("length", body.length).put("digest", digest).put("tail", body.takeLast(60)).put("postedAt", cursor.getLong(2)).put("savedAt", cursor.getLong(3)).put("markers", org.json.JSONArray(listOf("TEST-A", "END-A", "TEST-B", "END-B", "TEST-C", "END-C").filter { body.contains(it) })))
+                        }
+                    }
+                }
+                results.putString("latestMuizxo", rows.toString())
+                finish(Activity.RESULT_OK, results)
+                return
+            }
+            val preferenceName = "capture-settings-instrumentation"
+            targetContext.getSharedPreferences(preferenceName, 0).edit().clear().commit()
+            val captureSettings = CaptureSettings(targetContext, preferenceName)
+            check(captureSettings.enabled("test.app"))
+            captureSettings.setEnabled("test.app", false)
+            check(!CaptureSettings(targetContext, preferenceName).enabled("test.app"))
+            check(captureSettings.enabled("other.app"))
+            captureSettings.setEnabled("test.app", true)
+            check(CaptureSettings(targetContext, preferenceName).enabled("test.app"))
+            captureSettings.setEnabled("test.app", false)
+            captureSettings.setEnabled("other.app", false)
+            captureSettings.enableAll()
+            check(CaptureSettings(targetContext, preferenceName).enabled("test.app"))
+            check(CaptureSettings(targetContext, preferenceName).enabled("other.app"))
+            targetContext.getSharedPreferences(preferenceName, 0).edit().clear().commit()
+            results.putString("captureSettings", "PASS: default enabled, exclusion persisted, other apps unaffected, re-enable")
             targetContext.deleteDatabase(databaseName)
             HistoryStore(targetContext, databaseName).use { store ->
                 fun save(key: String = "key", body: String = "Привет Мир") = store.save(key, "test.app", "Телеграм", "Заголовок", body, "", 1000)
@@ -40,6 +78,16 @@ class HistoryInstrumentation : Instrumentation() {
                 store.forget("download")
                 check(store.save("download", "test.app", "Download", "Other file", "1%", "", 1001, true))
                 check(store.query("", emptyList(), 0, null)["matched"] == 2)
+                store.clear()
+                val chargingKey = "-1|com.android.systemui|2131364006|charging_state|10063"
+                store.save(chargingKey, "com.android.systemui", "System UI", "Charging", "41%", "", 1000, true)
+                val chargingId = store.lastId(chargingKey)
+                store.forget(chargingKey)
+                store.reconcile(emptySet())
+                store.save(chargingKey, "com.android.systemui", "System UI", "Charging", "42%", "", 1001)
+                check(store.lastId(chargingKey) == chargingId) { "Charging repost created a new row" }
+                check(store.query("", emptyList(), 0, null)["matched"] == 1)
+                check(store.query("42%", emptyList(), 0, null)["matched"] == 1)
                 store.clear()
                 store.save("selected-old", "telegram", "Telegram", "Title", "match", "", 1000)
                 store.save("selected-new", "telegram", "Telegram", "Title", "match", "", 1000)
@@ -88,6 +136,71 @@ class HistoryInstrumentation : Instrumentation() {
             check(NotificationContent.from(notification).body == "plain text")
             val big = Notification.Builder(targetContext, "test").setContentTitle("Title").setContentText("short").setStyle(Notification.BigTextStyle().bigText("full text")).build()
             check(NotificationContent.from(big).body == "full text")
+            val longText = "Long message ".repeat(600) + "END OF COMPLETE MESSAGE"
+            val rawMessage = Bundle().apply {
+                putCharSequence("text", longText)
+                putLong("time", 1234)
+                putCharSequence("sender", "Sender")
+            }
+            val longNotification = Notification.Builder(targetContext, "test").setContentTitle("Long message").setContentText("short").build()
+            longNotification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, arrayOf(rawMessage))
+            @Suppress("DEPRECATION") val platformText = Notification.MessagingStyle.Message.getMessagesFromBundleArray(arrayOf(rawMessage)).single().text.toString()
+            check(platformText.length < longText.length) { "Fixture must reproduce platform decoder truncation" }
+            val longContent = NotificationContent.from(longNotification)
+            check(longContent.body == "Sender: $longText") { "Messaging text was truncated" }
+            check(longContent.repairedFrom == "Sender: $platformText")
+            val secondMessage = Bundle().apply { putCharSequence("text", "Second"); putLong("time", 1235) }
+            longNotification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, arrayOf(rawMessage, secondMessage))
+            check(NotificationContent.from(longNotification).body == "Sender: $longText\nSecond")
+            val malformed = Bundle().apply { putInt("text", 123); putLong("time", 1236) }
+            longNotification.extras.putParcelableArray(Notification.EXTRA_MESSAGES, arrayOf(malformed))
+            check(NotificationContent.from(longNotification).body == "short")
+            HistoryStore(targetContext, databaseName).use { store ->
+                store.clear()
+                store.save("long", "test", "Test", longContent.title, longContent.repairedFrom, "", 1234)
+                val oldId = store.lastId("long")
+                check(store.save("long", "test", "Test", longContent.title, longContent.body, "", 1234, repairedFrom = longContent.repairedFrom))
+                check(store.lastId("long") == oldId) { "Repair should update the active truncated row" }
+                check(store.query("", emptyList(), 0, null)["matched"] == 1)
+            }
+            HistoryStore(targetContext, databaseName).use { store ->
+                @Suppress("UNCHECKED_CAST") val rows = store.query("", emptyList(), 0, null)["items"] as List<Map<String, Any>>
+                check(rows.single()["body"] == "Sender: $longText") { "Long text failed storage round trip" }
+            }
+            results.putString("longMessages", "PASS: raw messages over 7K chars, multiple senders, malformed fallback, active-row repair, storage persistence")
+            val completeA = NotificationMessage("Sender", "TEST-A " + "long text ".repeat(400) + " КОНЕЦ-A", 9000)
+            val shortA = completeA.copy(text = completeA.text.take(1010) + "…")
+            val completeB = NotificationMessage("Sender", "TEST-B " + "other text ".repeat(350) + " END-B", 9001)
+            val shortB = completeB.copy(text = completeB.text.take(1010) + "…")
+            val sameSecond = NotificationMessage("Sender", "A different message in the same second", 9001)
+            HistoryStore(targetContext, databaseName).use { store ->
+                store.clear()
+                fun save(parts: List<NotificationMessage>, key: String = "chat") = store.save(key, "test", "Test", "Chat", parts.joinToString("\n") { it.formatted() }, "", 9000, messages = parts)
+                save(listOf(shortA))
+                val firstId = store.lastId("chat")!!
+                save(listOf(completeA, shortB, sameSecond))
+                val secondId = store.lastId("chat")!!
+                save(listOf(completeA, completeB, sameSecond))
+                @Suppress("UNCHECKED_CAST") val rows = store.query("", emptyList(), 0, null)["items"] as List<Map<String, Any>>
+                check(rows.first { it["id"] == firstId }["body"] == completeA.formatted())
+                check(store.notification(firstId)?.get("body") == completeA.formatted())
+                check(store.notification(-1) == null)
+                check(rows.first { it["id"] == secondId }["body"] == listOf(completeA, completeB, sameSecond).joinToString("\n") { it.formatted() })
+                check(store.lastId("chat") == secondId) { "Full text should repair the existing snapshot" }
+                check(store.query("конец-a", emptyList(), 0, null)["matched"] == 2) { "Repair must refresh Cyrillic search" }
+                save(listOf(shortA), "another-chat")
+                check(store.query("END-B", emptyList(), 0, null)["matched"] == 1)
+            }
+            HistoryStore(targetContext, databaseName).use { store ->
+                store.forget("chat")
+                store.save("chat", "test", "Test", "Chat", shortA.formatted(), "", 9000, messages = listOf(shortA))
+                @Suppress("UNCHECKED_CAST") val rows = store.query("", emptyList(), 0, null)["items"] as List<Map<String, Any>>
+                check(rows.first()["body"] == completeA.formatted()) { "A late short preview must not overwrite full text" }
+                check(rows.any { it["body"] == shortA.formatted() }) { "Different chats must remain isolated" }
+                store.clear()
+                check(store.readableDatabase.rawQuery("SELECT COUNT(*) FROM history_messages", null).use { it.moveToFirst(); it.getInt(0) } == 0)
+            }
+            results.putString("messageUpdates", "PASS: short/full snapshots, earlier rows repaired, same-second isolation, persistence, no downgrade, Cyrillic search, clear cleanup")
             val bitmap = android.graphics.Bitmap.createBitmap(100, 200, android.graphics.Bitmap.Config.ARGB_8888)
             bitmap.eraseColor(android.graphics.Color.BLUE)
             val picture = Notification.Builder(targetContext, "test").setContentTitle("Screenshot")

@@ -1,3 +1,5 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -37,7 +39,7 @@ class _CopyNotificationButtonState extends State<CopyNotificationButton> {
     } finally {
       if (mounted) {
         setState(() => _copying = false);
-        _resetTimer = Timer(const Duration(seconds: 2), () {
+        _resetTimer = Timer(Duration(seconds: 2), () {
           if (mounted) {
             setState(() {
               _copied = false;
@@ -72,10 +74,10 @@ class _CopyNotificationButtonState extends State<CopyNotificationButton> {
         ),
         label: Text(
           _copied
-              ? 'Скопировано'
+              ? tr(context, 'Скопировано')
               : _failed
-              ? 'Не удалось скопировать'
-              : 'Скопировать текст',
+              ? tr(context, 'Не удалось скопировать')
+              : tr(context, 'Скопировать текст'),
         ),
       ),
     ),

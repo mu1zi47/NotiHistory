@@ -15,6 +15,11 @@ Future<void> main() async {
     }
   });
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-  SystemChrome.setSystemUIOverlayStyle(transparentSystemBars);
+  SystemChrome.setSystemUIOverlayStyle(
+    WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+            Brightness.dark
+        ? transparentDarkSystemBars
+        : transparentSystemBars,
+  );
   runApp(const NotiHistoryApp());
 }

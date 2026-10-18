@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'capture_status.dart';
+import 'saved_notification.dart';
 import 'history_page.dart';
 
 /// Boundary between application logic and the Android platform.
@@ -24,6 +25,7 @@ abstract interface class HistoryRepository {
     int since = 0,
   });
   Future<void> delete(int id);
+  Future<SavedNotification?> notification(int id);
   Future<Uint8List?> image(int id);
   Future<Uint8List?> icon(String packageName);
 }

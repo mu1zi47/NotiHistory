@@ -8,6 +8,51 @@ import 'support/memory_repository.dart';
 
 void main() {
   testWidgets(
+    'Image grows from its left preview and returns to the same bounds',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      const source = Rect.fromLTWH(16, 350, 90, 180);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => openNotificationImageViewer(
+                  context,
+                  base64Decode(
+                    'iVBORw0KGgoAAAANSUhEUgAAAAoAAAAUCAIAAAA7jDsBAAAAFUlEQVR4nGNY0HAAD2IYlR6VppY0AB4GdxCRJqSvAAAAAElFTkSuQmCC',
+                  ),
+                  MemoryRepository().entries.first,
+                  sourceRect: source,
+                ),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pump();
+      final flight = find.byKey(const ValueKey('image-viewer-flight'));
+      expect(tester.getRect(flight), source);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 160));
+      expect(tester.getSize(flight).width, greaterThan(source.width));
+      expect(tester.getSize(flight).width, lessThan(320));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Закрыть изображение'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(tester.getRect(flight).left, closeTo(source.left, 1));
+      expect(tester.getRect(flight).width, closeTo(source.width, 1));
+      await tester.pumpAndSettle();
+      expect(find.byType(NotificationImageViewer), findsNothing);
+    },
+  );
+
+  testWidgets(
     'Gallery animates zoom, toggles chrome and dismisses only at base scale',
     (tester) async {
       tester.view.physicalSize = const Size(320, 640);
@@ -24,7 +69,7 @@ void main() {
                     'iVBORw0KGgoAAAANSUhEUgAAAAoAAAAUCAIAAAA7jDsBAAAAFUlEQVR4nGNY0HAAD2IYlR6VppY0AB4GdxCRJqSvAAAAAElFTkSuQmCC',
                   ),
                   MemoryRepository().entries.first,
-                  sourceRect: const Rect.fromLTWH(30, 350, 260, 180),
+                  sourceRect: const Rect.fromLTWH(16, 350, 90, 180),
                 ),
                 child: const Text('Открыть'),
               ),

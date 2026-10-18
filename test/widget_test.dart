@@ -1,4 +1,7 @@
+import 'package:noti_history/core/settings/app_preferences.dart';
+import 'package:noti_history/features/history/domain/history_repository.dart';
 import 'package:noti_history/features/history/domain/capture_status.dart';
+import 'package:noti_history/features/history/domain/saved_notification.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +10,7 @@ import 'package:noti_history/core/theme/app_theme.dart';
 import 'package:noti_history/features/history/presentation/history_screen.dart';
 import 'package:noti_history/features/history/presentation/widgets/period_filter_button.dart';
 import 'package:noti_history/features/history/presentation/widgets/swipe_notification_card.dart';
+import 'package:noti_history/features/history/presentation/widgets/notification_card.dart';
 
 import 'support/memory_repository.dart';
 
@@ -61,6 +65,169 @@ void main() {
     expect(find.byType(SelectableText), findsWidgets);
   });
 
+  testWidgets('Long press opens a menu and deletes only one notification', (
+    tester,
+  ) async {
+    final repo = MemoryRepository();
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(),
+        home: HistoryScreen(repository: repo),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.longPress(find.text('Аня'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('notification-action-delete')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('notification-action-clearApp')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('notification-action-disableApp')),
+      findsOneWidget,
+    );
+    expect(find.byType(BottomSheet), findsNothing);
+    final originalX = tester.getTopLeft(find.text('Аня')).dx;
+    final originalHeight = tester
+        .getSize(find.byKey(const ValueKey('swipe-2')))
+        .height;
+    await tester.tap(find.byKey(const ValueKey('notification-action-delete')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    expect(repo.entries.length, 2);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('swipe-2'))).height,
+      originalHeight,
+    );
+    expect(
+      find.byKey(const ValueKey('swipe-delete-background-2')),
+      findsOneWidget,
+    );
+    expect(tester.getTopLeft(find.text('Аня')).dx, greaterThan(originalX));
+    await tester.pumpAndSettle();
+    expect(repo.entries.single.packageName, 'com.mail');
+    expect(find.text('Билеты'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'Menu disables capture without deleting history and confirms app clear',
+    (tester) async {
+      const channel = MethodChannel('notihistory/history');
+      Map<dynamic, dynamic>? settings;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'setCaptureEnabled') {
+              settings = Map<dynamic, dynamic>.from(call.arguments as Map);
+            }
+            return null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final repo = MemoryRepository();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(),
+          home: HistoryScreen(repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> action(String name) async {
+        await tester.longPress(find.text('Аня'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(ValueKey('notification-action-$name')));
+        await tester.pumpAndSettle();
+      }
+
+      await action('disableApp');
+      expect(settings, {'packageName': 'org.telegram', 'enabled': false});
+      expect(repo.entries.length, 2);
+      await action('clearApp');
+      expect(find.text('Удалить уведомления приложения?'), findsOneWidget);
+      await tester.tap(find.text('Отмена'));
+      await tester.pumpAndSettle();
+      expect(repo.entries.length, 2);
+      await action('clearApp');
+      await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+      await tester.pumpAndSettle();
+      expect(repo.entries.single.packageName, 'com.mail');
+      expect(find.text('Билеты'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'App deletion animates visible rows and restores them on failure',
+    (tester) async {
+      final repo = FailingAppClearRepository();
+      final now = DateTime.now();
+      repo.entries.add(
+        SavedNotification(
+          id: 3,
+          packageName: 'org.telegram',
+          appName: 'Телеграм',
+          title: 'Второе сообщение',
+          body: 'Body',
+          subText: '',
+          postedAt: now,
+          savedAt: now,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(),
+          home: HistoryScreen(repository: repo),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final initial = tester.getRect(find.byKey(const ValueKey('swipe-2')));
+      Future<void> clearApp() async {
+        await tester.longPress(find.text('Аня'));
+        await tester.pumpAndSettle();
+        expect(find.text('Удалить все уведомления'), findsOneWidget);
+        expect(find.text('Отключить сохранение'), findsOneWidget);
+        await tester.tap(
+          find.byKey(const ValueKey('notification-action-clearApp')),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
+      }
+
+      await clearApp();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 60));
+      expect(repo.entries.length, 3);
+      expect(
+        find.byKey(const ValueKey('swipe-delete-background-2')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('swipe-delete-background-3')),
+        findsOneWidget,
+      );
+      await tester.pumpAndSettle();
+      expect(repo.entries.length, 3);
+      expect(tester.getRect(find.byKey(const ValueKey('swipe-2'))), initial);
+      expect(
+        find.text('Не удалось удалить уведомления. Попробуйте снова.'),
+        findsOneWidget,
+      );
+      repo.fail = false;
+      await clearApp();
+      await tester.pumpAndSettle();
+      expect(repo.entries.single.packageName, 'com.mail');
+      expect(find.text('Билеты'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Filtered clear confirms scope and keeps other apps', (
     tester,
   ) async {
@@ -88,9 +255,8 @@ void main() {
     await tester.tap(find.widgetWithText(FilledButton, 'Удалить'));
     await tester.pumpAndSettle();
     expect(repo.entries.single.packageName, 'com.mail');
-    expect(find.text('Ничего не нашлось'), findsOneWidget);
-    await tester.tap(find.text('Сбросить фильтры'));
-    await tester.pumpAndSettle();
+    expect(find.text('Ничего не нашлось'), findsNothing);
+    expect(find.text('Фильтр'), findsOneWidget);
     expect(find.text('Билеты'), findsOneWidget);
   });
 
@@ -145,13 +311,13 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final repo = MemoryRepository()..granted = false;
-    await tester.pumpWidget(NotiHistoryApp(repository: repo));
+    await tester.pumpWidget(_russianApp(repository: repo));
     await tester.pumpAndSettle();
     expect(find.text('Включить сохранение'), findsOneWidget);
   });
 
   testWidgets('A tap outside the search removes its focus', (tester) async {
-    await tester.pumpWidget(NotiHistoryApp(repository: MemoryRepository()));
+    await tester.pumpWidget(_russianApp(repository: MemoryRepository()));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Поиск'));
@@ -166,7 +332,7 @@ void main() {
 
   testWidgets('Application sheet applies multiple packages', (tester) async {
     final repo = MemoryRepository();
-    await tester.pumpWidget(NotiHistoryApp(repository: repo));
+    await tester.pumpWidget(_russianApp(repository: repo));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Фильтр приложений'));
@@ -213,6 +379,92 @@ void main() {
     expect(count.data, '2');
   });
 
+  testWidgets(
+    'Filter swipes confirm app-wide deletion and reopen after cancel or delete',
+    (tester) async {
+      final repo = MemoryRepository();
+      await tester.pumpWidget(_russianApp(repository: repo));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Фильтр приложений'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('filter-option-org.telegram')),
+      );
+      await tester.pump();
+      final row = find.byKey(const ValueKey('filter-swipe-org.telegram'));
+      await tester.drag(row, const Offset(250, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Фильтр приложений'), findsNothing);
+      expect(find.text('Удалить уведомления приложения?'), findsOneWidget);
+      expect(repo.clearCalls, 0);
+      await tester.tap(find.text('Отмена'));
+      await tester.pumpAndSettle();
+      expect(find.text('Фильтр приложений'), findsOneWidget);
+      expect(find.text('Применить · 1'), findsOneWidget);
+      expect(repo.entries.length, 2);
+      await tester.drag(row, const Offset(-250, 0));
+      await tester.pumpAndSettle();
+      expect(find.text('Фильтр приложений'), findsNothing);
+      await tester.tap(find.text('Удалить'));
+      await tester.pumpAndSettle();
+      expect(find.text('Фильтр приложений'), findsOneWidget);
+      expect(row, findsNothing);
+      expect(
+        find.byKey(const ValueKey('filter-option-com.mail')),
+        findsOneWidget,
+      );
+      expect(find.text('Показать все'), findsOneWidget);
+      expect(repo.entries.single.packageName, 'com.mail');
+      expect(repo.clearCalls, 1);
+      await tester.tap(find.text('Показать все'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Filter groups apps in one block and long press applies the selected app',
+    (tester) async {
+      final repo = MemoryRepository();
+      await tester.pumpWidget(_russianApp(repository: repo));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Фильтр приложений'));
+      await tester.pumpAndSettle();
+      final block = find.byKey(const ValueKey('filter-apps-block'));
+      expect(block, findsOneWidget);
+      expect(
+        find.descendant(
+          of: block,
+          matching: find.byKey(const ValueKey('filter-option-org.telegram')),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: block,
+          matching: find.byKey(const ValueKey('filter-option-com.mail')),
+        ),
+        findsOneWidget,
+      );
+      final telegram = find.byKey(const ValueKey('filter-option-org.telegram'));
+      await tester.tap(telegram);
+      await tester.pumpAndSettle();
+      expect(find.text('Применить · 1'), findsOneWidget);
+      await tester.longPress(telegram);
+      await tester.pumpAndSettle();
+      expect(find.text('Фильтр приложений'), findsNothing);
+      expect(repo.lastPackages, {'org.telegram'});
+      expect(find.text('Аня'), findsOneWidget);
+      expect(find.text('Билеты'), findsNothing);
+      await tester.tap(find.byTooltip('Фильтр приложений'));
+      await tester.pumpAndSettle();
+      await tester.longPress(find.byKey(const ValueKey('filter-option-all')));
+      await tester.pumpAndSettle();
+      expect(repo.lastPackages, isEmpty);
+      expect(find.text('Билеты'), findsOneWidget);
+    },
+  );
+
   testWidgets('Purple actions share the period button style', (tester) async {
     final theme = buildAppTheme();
     final filledStyle = theme.filledButtonTheme.style!;
@@ -222,13 +474,62 @@ void main() {
     final shape = filledStyle.shape!.resolve({})! as RoundedRectangleBorder;
     expect(shape.borderRadius, BorderRadius.circular(actionRadius));
 
-    await tester.pumpWidget(NotiHistoryApp(repository: MemoryRepository()));
+    await tester.pumpWidget(_russianApp(repository: MemoryRepository()));
     await tester.pumpAndSettle();
     expect(
       find.byKey(const ValueKey('history-bottom-actions')),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('app-filter-__all__')), findsNothing);
+  });
+
+  testWidgets('Deleting the first row preserves a swipe on the next row', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final repo = MemoryRepository();
+    for (var i = 0; i < repo.entries.length; i++) {
+      final item = repo.entries[i];
+      repo.entries[i] = SavedNotification(
+        id: item.id,
+        packageName: item.packageName,
+        appName: item.appName,
+        title: item.title,
+        body: item.body,
+        subText: item.subText,
+        postedAt: item.postedAt,
+        savedAt: DateTime(2026, 10, 17, 12 - i),
+      );
+    }
+
+    await tester.pumpWidget(_russianApp(repository: repo));
+    await tester.pumpAndSettle();
+    final first = find.byKey(const ValueKey('swipe-2'));
+    final second = find.byKey(const ValueKey('swipe-1'));
+    final firstGesture = await tester.startGesture(tester.getCenter(first));
+    await firstGesture.moveBy(const Offset(-180, 0));
+    await firstGesture.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pump(const Duration(milliseconds: 50));
+    final secondGesture = await tester.startGesture(tester.getCenter(second));
+    await secondGesture.moveBy(const Offset(180, 0));
+    await tester.pump();
+    final state = tester.state(second);
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+    expect(first, findsNothing);
+    expect(tester.state(second), same(state));
+    expect(
+      find.byKey(const ValueKey('swipe-delete-background-1')),
+      findsOneWidget,
+    );
+    await secondGesture.up();
+    await tester.pumpAndSettle();
+    expect(repo.entries, isEmpty);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets(
@@ -239,13 +540,57 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final repo = MemoryRepository();
-      await tester.pumpWidget(NotiHistoryApp(repository: repo));
+      await tester.pumpWidget(_russianApp(repository: repo));
       await tester.pumpAndSettle();
 
       final first = find.ancestor(
         of: find.text('Аня'),
         matching: find.byType(SwipeNotificationCard),
       );
+      for (final distance in [-70.0, 70.0]) {
+        final gesture = await tester.startGesture(tester.getCenter(first));
+        await gesture.moveBy(Offset(distance, 0));
+        await tester.pump();
+        final background = find.byKey(
+          const ValueKey('swipe-delete-background-2'),
+        );
+        expect(background, findsOneWidget);
+        expect(
+          tester.widget<ColoredBox>(background).color,
+          const Color(0xFFFBEAEC),
+        );
+        expect(
+          find.descendant(
+            of: background,
+            matching: find.byIcon(Icons.delete_outline_rounded),
+          ),
+          findsOneWidget,
+        );
+        final card = tester.widget<NotificationCard>(
+          find.descendant(of: first, matching: find.byType(NotificationCard)),
+        );
+        expect(card.showTopBorder, isFalse);
+        expect(card.showBottomBorder, isTrue);
+        final iconPosition = find.byKey(
+          const ValueKey('swipe-delete-icon-position-2'),
+        );
+        expect(
+          tester.widget<AnimatedAlign>(iconPosition).alignment,
+          distance < 0 ? Alignment.centerRight : Alignment.centerLeft,
+        );
+        await gesture.moveBy(Offset(distance.sign * 160, 0));
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(
+          tester.widget<AnimatedAlign>(iconPosition).alignment,
+          Alignment.center,
+        );
+        await gesture.moveBy(Offset(-distance.sign * 160, 0));
+        await tester.pump(const Duration(milliseconds: 200));
+        await gesture.cancel();
+        await tester.pumpAndSettle();
+        expect(background, findsNothing);
+        expect(repo.entries.length, 2);
+      }
       await tester.timedDrag(
         first,
         const Offset(-20, 0),
@@ -284,7 +629,7 @@ void main() {
     tester.view.physicalSize = const Size(430, 1000);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(NotiHistoryApp(repository: MemoryRepository()));
+    await tester.pumpWidget(_russianApp(repository: MemoryRepository()));
     await tester.pumpAndSettle();
     expect(find.byType(RefreshIndicator), findsNothing);
     final first = find.byKey(const ValueKey('swipe-2'));
@@ -335,7 +680,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final repo = _RefreshCountingRepository();
-    await tester.pumpWidget(NotiHistoryApp(repository: repo));
+    await tester.pumpWidget(_russianApp(repository: repo));
     await tester.pumpAndSettle();
     final calls = repo.statusCalls;
     final first = find.byKey(const ValueKey('swipe-2'));
@@ -369,7 +714,7 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final repo = MemoryRepository();
-    await tester.pumpWidget(NotiHistoryApp(repository: repo));
+    await tester.pumpWidget(_russianApp(repository: repo));
     await tester.pumpAndSettle();
     expect(find.text('Ваша история'), findsNothing);
     expect(find.text('Лента уведомлений'), findsNothing);
@@ -440,13 +785,153 @@ void main() {
     );
   });
 
+  testWidgets('Previous day header leaves with its group while scrolling', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final repo = MemoryRepository();
+    final today = DateTime.now();
+    final yesterday = DateTime(
+      today.year,
+      today.month,
+      today.day,
+    ).subtract(const Duration(days: 1));
+    repo.entries.clear();
+    for (var i = 0; i < 20; i++) {
+      final date = i == 0 ? today : yesterday;
+      repo.entries.add(
+        SavedNotification(
+          id: 100 - i,
+          packageName: 'test',
+          appName: 'Test',
+          title: 'Notification $i',
+          body: 'Body',
+          subText: '',
+          postedAt: date,
+          savedAt: date,
+        ),
+      );
+    }
+    await tester.pumpWidget(_russianApp(repository: repo));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('day-header-Сегодня')).hitTestable(),
+      findsOneWidget,
+    );
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -320));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('day-header-Сегодня')).hitTestable(),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('day-header-outline')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('day-header-Вчера')).hitTestable(),
+      findsOneWidget,
+    );
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('day-header-Вчера'))).dy,
+      closeTo(64, 1),
+    );
+    expect(find.text('NotiHistory').hitTestable(), findsOneWidget);
+    final feed = find.byType(CustomScrollView);
+    final scroll = tester.widget<CustomScrollView>(feed).controller!;
+    scroll.jumpTo(scroll.position.maxScrollExtent);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Вчера'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getTopLeft(find.byKey(const ValueKey('swipe-99'))).dy,
+      closeTo(106, 1),
+    );
+    expect(scroll.offset, greaterThan(0));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'Up button and app bar return to the start without blocking settings',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final repo = MemoryRepository();
+      final now = DateTime.now();
+      repo.entries.clear();
+      for (var i = 0; i < 20; i++) {
+        repo.entries.add(
+          SavedNotification(
+            id: 100 - i,
+            packageName: 'test',
+            appName: 'Test',
+            title: 'Notification $i',
+            body: 'Body',
+            subText: '',
+            postedAt: now,
+            savedAt: now,
+          ),
+        );
+      }
+      await tester.pumpWidget(_russianApp(repository: repo));
+      await tester.pumpAndSettle();
+      final up = find.byKey(const ValueKey('scroll-to-top'));
+      final feed = find.byType(CustomScrollView);
+      final scroll = tester.widget<CustomScrollView>(feed).controller!;
+      expect(up.hitTestable(), findsNothing);
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      expect(up.hitTestable(), findsNothing);
+      final viewport = tester.getRect(feed);
+      expect(
+        tester.getBottomLeft(find.byKey(const ValueKey('swipe-81'))).dy,
+        closeTo(viewport.bottom, 1),
+      );
+      final lastCard = tester.widget<NotificationCard>(
+        find.descendant(
+          of: find.byKey(const ValueKey('swipe-81')),
+          matching: find.byType(NotificationCard),
+        ),
+      );
+      expect(lastCard.showBottomBorder, isFalse);
+      scroll.jumpTo(scroll.position.maxScrollExtent - 60);
+      await tester.pumpAndSettle();
+      expect(up.hitTestable(), findsOneWidget);
+      final button = tester.getRect(up);
+      expect(viewport.right - 16 - button.right, closeTo(8, .1));
+      expect(viewport.bottom - button.bottom, closeTo(8, .1));
+      expect(
+        scroll.offset,
+        greaterThan(scroll.position.viewportDimension * 1.5),
+      );
+      await tester.tap(up);
+      await tester.pump();
+      expect(
+        scroll.offset,
+        lessThanOrEqualTo(scroll.position.viewportDimension * .75),
+      );
+      await tester.pumpAndSettle();
+      expect(scroll.offset, 0);
+      expect(up.hitTestable(), findsNothing);
+      scroll.jumpTo(scroll.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('NotiHistory'));
+      await tester.pumpAndSettle();
+      expect(scroll.offset, 0);
+      await tester.tap(find.byTooltip('Настройки'));
+      await tester.pumpAndSettle();
+      expect(find.text('Сохранение уведомлений'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('The feed stays above the docked actions', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     tester.view.padding = const FakeViewPadding(top: 28, bottom: 24);
     tester.view.viewPadding = const FakeViewPadding(top: 28, bottom: 24);
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(NotiHistoryApp(repository: MemoryRepository()));
+    await tester.pumpWidget(_russianApp(repository: MemoryRepository()));
     await tester.pumpAndSettle();
     expect(
       tester.widget<SliverAppBar>(find.byType(SliverAppBar)).pinned,
@@ -456,21 +941,18 @@ void main() {
     expect(find.byType(LinearProgressIndicator), findsNothing);
     expect(
       find.byKey(const ValueKey('notification-viewport-corners')),
-      findsOneWidget,
+      findsNothing,
     );
     final cards = tester
         .widgetList<SwipeNotificationCard>(find.byType(SwipeNotificationCard))
         .toList();
-    expect(cards.first.borderRadius.topLeft.x, 0);
+    expect(cards.first.borderRadius.topLeft.x, 20);
     expect(cards.first.borderRadius.bottomLeft.x, 0);
     expect(cards.first.bottomSpacing, 0);
     expect(cards.last.borderRadius.topLeft.x, 0);
     expect(cards.last.borderRadius.bottomLeft.x, 20);
-    expect(cards.last.bottomSpacing, 12);
-    expect(
-      find.byKey(const ValueKey('day-header-corners-Сегодня')),
-      findsOneWidget,
-    );
+    expect(cards.last.bottomSpacing, 0);
+    expect(find.byKey(const ValueKey('day-header-Сегодня')), findsOneWidget);
     final viewport = tester.getRect(find.byType(CustomScrollView));
     final actions = tester.getRect(
       find.byKey(const ValueKey('history-bottom-actions')),
@@ -478,10 +960,7 @@ void main() {
     expect(viewport.top, 0);
     expect(viewport.bottom, lessThanOrEqualTo(actions.top));
     expect(actions.top, lessThan(844));
-    expect(
-      tester.getTopLeft(find.text('NotiHistory')).dy,
-      greaterThan(28),
-    );
+    expect(tester.getTopLeft(find.text('NotiHistory')).dy, greaterThan(28));
     expect(find.byKey(const ValueKey('app-filter-__all__')), findsNothing);
   });
 }
@@ -493,4 +972,29 @@ class _RefreshCountingRepository extends MemoryRepository {
     statusCalls++;
     return super.status();
   }
+}
+
+class FailingAppClearRepository extends MemoryRepository {
+  bool fail = true;
+  @override
+  Future<void> clear({
+    String search = '',
+    Set<String> packageNames = const {},
+    int since = 0,
+  }) async {
+    if (fail) throw StateError('Storage unavailable');
+    await super.clear(search: search, packageNames: packageNames, since: since);
+  }
+}
+
+Widget _russianApp({HistoryRepository? repository}) {
+  final preferences = _RussianPreferences();
+  addTearDown(preferences.dispose);
+  return NotiHistoryApp(repository: repository, preferences: preferences);
+}
+
+class _RussianPreferences extends AppPreferences {
+  _RussianPreferences() : super(deviceLocales: const [Locale('ru')]);
+  @override
+  Future<void> load() async {}
 }

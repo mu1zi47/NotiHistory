@@ -8,6 +8,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
 class NotificationCaptureService : NotificationListenerService() {
+    private val settings by lazy { CaptureSettings(applicationContext) }
     private data class Label(val text: String, val expiresAt: Long)
     private val labels = LruCache<String, Label>(80)
 
@@ -63,12 +64,13 @@ class NotificationCaptureService : NotificationListenerService() {
     private fun capture(sbn: StatusBarNotification) {
         HistoryRuntime.worker.execute {
             try {
+                if (!settings.enabled(sbn.packageName)) return@execute
                 val content = NotificationContent.from(sbn.notification)
                 val store = HistoryRuntime.store(this)
                 val extras = sbn.notification.extras
                 val coalesce = NotificationImage.isMedia(sbn.notification) || sbn.isOngoing || extras.getInt(android.app.Notification.EXTRA_PROGRESS_MAX, 0) > 0 ||
                     extras.getBoolean(android.app.Notification.EXTRA_PROGRESS_INDETERMINATE, false)
-                val changed = store.save(sbn.key, sbn.packageName, appName(sbn.packageName), content.title, content.body, content.subText, sbn.postTime, coalesce, NotificationImage.extract(this, sbn.notification))
+                val changed = store.save(sbn.key, sbn.packageName, appName(sbn.packageName), content.title, content.body, content.subText, sbn.postTime, coalesce, NotificationImage.extract(this, sbn.notification), content.repairedFrom, content.messages)
                 store.lastId(sbn.key)?.let { id ->
                     val action = sbn.notification.contentIntent
                     if (action != null) HistoryRuntime.actions.put(id, action)

@@ -18,6 +18,14 @@ class MemoryRepository implements HistoryRepository {
     openedNotification = id;
   }
 
+  @override
+  Future<SavedNotification?> notification(int id) async {
+    for (final item in entries) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
+
   int clearCalls = 0;
   String lastSearch = '';
   int lastSince = 0;

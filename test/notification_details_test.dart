@@ -122,6 +122,104 @@ void main() {
     },
   );
 
+  testWidgets('Open details refresh when a short message is completed', (
+    tester,
+  ) async {
+    final events = StreamController<void>.broadcast();
+    addTearDown(events.close);
+    final repository = _UpdatingRepository(events.stream);
+    final original = repository.entries.first;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () =>
+                  showNotificationDetails(context, original, repository),
+              child: const Text('Открыть'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Открыть'));
+    await tester.pumpAndSettle();
+    expect(find.text(original.body), findsOneWidget);
+    repository.entries[0] = SavedNotification(
+      id: original.id,
+      packageName: original.packageName,
+      appName: original.appName,
+      title: original.title,
+      body: 'Полный текст END-D',
+      subText: original.subText,
+      postedAt: original.postedAt,
+      savedAt: original.savedAt,
+    );
+    events.add(null);
+    await tester.pumpAndSettle();
+    expect(find.text('Полный текст END-D'), findsOneWidget);
+    expect(find.text(original.body), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'Long text scrolls while app information and actions stay pinned',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 700);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final repository = MemoryRepository();
+      final original = repository.entries.first;
+      final item = SavedNotification(
+        id: original.id,
+        packageName: original.packageName,
+        appName: original.appName,
+        title: original.title,
+        body: List.filled(150, 'Длинное сообщение').join('\n'),
+        subText: '',
+        postedAt: original.postedAt,
+        savedAt: original.savedAt,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showNotificationDetails(context, item, repository),
+                child: const Text('Открыть'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Открыть'));
+      await tester.pumpAndSettle();
+      await tester.drag(
+        find.byKey(const ValueKey('history-sheet-drag-header')),
+        const Offset(0, -200),
+      );
+      await tester.pumpAndSettle();
+      final header = tester.getTopLeft(find.text(item.appName));
+      final title = tester.getTopLeft(find.text(item.title));
+      final buttons = tester.getTopLeft(find.text('Скопировать текст'));
+      final viewport = find.byKey(const ValueKey('history-sheet-scroll'));
+      final scrollable = find
+          .descendant(of: viewport, matching: find.byType(Scrollable))
+          .first;
+      await tester.drag(viewport, const Offset(0, -400));
+      await tester.pumpAndSettle();
+      expect(
+        tester.state<ScrollableState>(scrollable).position.pixels,
+        greaterThan(0),
+      );
+      expect(tester.getTopLeft(find.text(item.appName)), header);
+      expect(tester.getTopLeft(find.text(item.title)), title);
+      expect(tester.getTopLeft(find.text('Скопировать текст')), buttons);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Unavailable notification has a disabled open button', (
     tester,
   ) async {
@@ -184,4 +282,11 @@ void main() {
       expect(tester.takeException(), isNull);
     },
   );
+}
+
+class _UpdatingRepository extends MemoryRepository {
+  _UpdatingRepository(this.events);
+  final Stream<void> events;
+  @override
+  Stream<void> get changes => events;
 }

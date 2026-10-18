@@ -9,7 +9,7 @@ import java.util.Calendar
 import java.util.Locale
 
 /** Writes are serialized; a separate reader uses WAL. No Flutter engine is needed. */
-class HistoryStore(context: Context, databaseName: String = "notification_history.db") : SQLiteOpenHelper(context, databaseName, null, 4) {
+class HistoryStore(context: Context, databaseName: String = "notification_history.db") : SQLiteOpenHelper(context, databaseName, null, 5) {
     init { setWriteAheadLoggingEnabled(true) }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -23,9 +23,11 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
         db.execSQL("CREATE INDEX history_package ON history(package_name, id)")
         db.execSQL("CREATE TABLE last_seen (notification_key TEXT PRIMARY KEY, digest TEXT NOT NULL, history_id INTEGER, coalescing INTEGER NOT NULL DEFAULT 0)")
         addIndexes(db)
+        addMessageTable(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 5) addMessageTable(db)
         if (oldVersion < 4) db.execSQL("ALTER TABLE history ADD COLUMN image BLOB")
         if (oldVersion < 2) addIndexes(db)
         if (oldVersion < 3) {
@@ -40,37 +42,108 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
     }
 
     fun save(key: String, packageName: String, appName: String, title: String,
-             body: String, subText: String, postedAt: Long, coalesce: Boolean = false, image: ByteArray? = null): Boolean {
-        val hasher = MessageDigest.getInstance("SHA-256")
-        hasher.update("$title\u0000$body\u0000$subText".toByteArray())
-        if (image != null) hasher.update(image)
-        val digest = hasher.digest()
-            .joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
+             body: String, subText: String, postedAt: Long, coalesce: Boolean = false, image: ByteArray? = null, repairedFrom: String? = null, messages: List<NotificationMessage> = emptyList()): Boolean {
         val db = writableDatabase
         db.beginTransaction()
         try {
+            val (resolvedMessages, repaired) = repairMessages(db, key, messages)
+            val effectiveBody = if (resolvedMessages.isEmpty()) body else resolvedMessages.joinToString("\n") { it.formatted() }
+            val hasher = MessageDigest.getInstance("SHA-256")
+            hasher.update("$title\u0000$effectiveBody\u0000$subText".toByteArray())
+            if (image != null) hasher.update(image)
+            val digest = hasher.digest().joinToString("") { (it.toInt() and 0xff).toString(16).padStart(2, '0') }
             val previous = db.rawQuery("SELECT digest, history_id, coalescing FROM last_seen WHERE notification_key = ?", arrayOf(key))
                 .use { if (it.moveToFirst()) Triple(it.getString(0), if (it.isNull(1)) null else it.getLong(1), it.getInt(2) != 0) else null }
-            if (previous?.first == digest) { db.setTransactionSuccessful(); return false }
+            if (previous?.first == digest) {
+                previous.second?.let { id ->
+                    val exists = db.rawQuery("SELECT 1 FROM history WHERE id = ?", arrayOf(id.toString())).use { it.moveToFirst() }
+                    if (exists && resolvedMessages.isNotEmpty()) saveMessages(db, id, key, resolvedMessages)
+                }
+                db.setTransactionSuccessful()
+                return repaired
+            }
             val values = ContentValues().apply {
                 put("package_name", packageName); put("app_name", appName)
-                put("title", title); put("body", body); put("sub_text", subText); put("image", image)
+                put("title", title); put("body", effectiveBody); put("sub_text", subText); put("image", image)
                 put("posted_at", postedAt); put("saved_at", System.currentTimeMillis())
-                put("search_text", "$appName\n$packageName\n$title\n$body\n$subText".lowercase(Locale.ROOT))
+                put("search_text", "$appName\n$packageName\n$title\n$effectiveBody\n$subText".lowercase(Locale.ROOT))
             }
-            val coalescing = coalesce || previous?.third == true
+            val coalescing = coalesce || isChargingKey(key) || previous?.third == true
             val previousId = previous?.second
             val sameContent = if (previousId == null) false else db.rawQuery(
                 "SELECT title, body, sub_text FROM history WHERE id = ?", arrayOf(previousId.toString())
-            ).use { it.moveToFirst() && it.getString(0) == title && it.getString(1) == body && it.getString(2) == subText }
+            ).use { it.moveToFirst() && it.getString(0) == title && (it.getString(1) == effectiveBody || (repairedFrom != null && it.getString(1) == repairedFrom)) && it.getString(2) == subText }
             val updated = if ((coalescing || sameContent) && previousId != null) db.update("history", values, "id = ?", arrayOf(previousId.toString())) else 0
             val id = if (updated > 0) previousId!! else db.insertOrThrow("history", null, values)
+            saveMessages(db, id, key, resolvedMessages)
             db.insertWithOnConflict("last_seen", null, ContentValues().apply {
                 put("notification_key", key); put("digest", digest); put("history_id", id); put("coalescing", if (coalescing) 1 else 0)
             }, SQLiteDatabase.CONFLICT_REPLACE)
             db.setTransactionSuccessful()
             return true
         } finally { db.endTransaction() }
+    }
+
+    private fun saveMessages(db: SQLiteDatabase, id: Long, key: String, messages: List<NotificationMessage>) {
+        db.delete("history_messages", "history_id = ?", arrayOf(id.toString()))
+        messages.forEachIndexed { position, message ->
+            db.insertOrThrow("history_messages", null, ContentValues().apply {
+                put("history_id", id); put("position", position); put("notification_key", key)
+                put("sender", message.sender); put("sent_at", message.time); put("body", message.text)
+            })
+        }
+    }
+
+    private fun addMessageTable(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE history_messages (history_id INTEGER NOT NULL, position INTEGER NOT NULL, notification_key TEXT NOT NULL, sender TEXT NOT NULL, sent_at INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(history_id, position))")
+        db.execSQL("CREATE INDEX history_message_identity ON history_messages(notification_key, sent_at, sender)")
+        db.execSQL("CREATE TRIGGER history_messages_cleanup AFTER DELETE ON history BEGIN DELETE FROM history_messages WHERE history_id = OLD.id; END")
+    }
+
+    /** A later Telegram snapshot can contain the full text of an earlier short push. */
+    private fun repairMessages(db: SQLiteDatabase, key: String, incoming: List<NotificationMessage>): Pair<List<NotificationMessage>, Boolean> {
+        val affected = mutableSetOf<Long>()
+        val resolved = incoming.map { message ->
+            data class Previous(val id: Long, val position: Int, val message: NotificationMessage)
+            val previous = db.rawQuery(
+                "SELECT history_id, position, body FROM history_messages WHERE notification_key = ? AND sent_at = ? AND sender = ?",
+                arrayOf(key, message.time.toString(), message.sender)
+            ).use { cursor -> buildList {
+                while (cursor.moveToNext()) add(Previous(cursor.getLong(0), cursor.getInt(1), message.copy(text = cursor.getString(2))))
+            } }
+            // Never replace complete text with a shorter preview, including after a reconnect.
+            val candidates = previous.map { it.message }.filter { message.isExpandedBy(it) }.distinctBy { it.text }
+            val full = if (candidates.size == 1) candidates.single() else message
+            previous.filter { it.message.isExpandedBy(full) }.forEach { old ->
+                db.execSQL("UPDATE history_messages SET body = ? WHERE history_id = ? AND position = ?", arrayOf<Any>(full.text, old.id, old.position))
+                affected.add(old.id)
+            }
+            full
+        }
+        affected.forEach { id ->
+            val body = db.rawQuery("SELECT sender, body FROM history_messages WHERE history_id = ? ORDER BY position", arrayOf(id.toString())).use { cursor ->
+                buildList { while (cursor.moveToNext()) {
+                    val sender = cursor.getString(0); val text = cursor.getString(1)
+                    add(if (sender.isBlank()) text else "$sender: $text")
+                } }.joinToString("\n")
+            }
+            val searchText = db.rawQuery("SELECT app_name, package_name, title, sub_text FROM history WHERE id = ?", arrayOf(id.toString())).use { cursor ->
+                if (!cursor.moveToFirst()) return@forEach
+                "${cursor.getString(0)}\n${cursor.getString(1)}\n${cursor.getString(2)}\n$body\n${cursor.getString(3)}".lowercase(Locale.ROOT)
+            }
+            db.execSQL("UPDATE history SET body = ?, search_text = ? WHERE id = ?", arrayOf<Any>(body, searchText, id))
+        }
+        return resolved to affected.isNotEmpty()
+    }
+
+    fun notification(id: Long): Map<String, Any>? = readableDatabase.rawQuery(
+        "SELECT id, package_name, app_name, title, body, sub_text, posted_at, saved_at, image IS NOT NULL FROM history WHERE id = ?", arrayOf(id.toString())
+    ).use { c ->
+        if (!c.moveToFirst()) null else mapOf(
+            "id" to c.getLong(0), "packageName" to c.getString(1), "appName" to c.getString(2),
+            "title" to c.getString(3), "body" to c.getString(4), "subText" to c.getString(5),
+            "postedAt" to c.getLong(6), "savedAt" to c.getLong(7), "hasImage" to (c.getInt(8) != 0)
+        )
     }
 
     fun image(id: Long): ByteArray? {
@@ -97,7 +170,15 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
     ).use { if (it.moveToFirst() && !it.isNull(0)) it.getLong(0) else null }
 
     fun forget(key: String) {
+        // Samsung removes and reposts charging_state as the battery changes.
+        // Keep its row identity across removals and listener reconciliation.
+        if (isChargingKey(key)) return
         writableDatabase.delete("last_seen", "notification_key = ?", arrayOf(key))
+    }
+
+    private fun isChargingKey(key: String): Boolean {
+        val parts = key.split('|')
+        return parts.size >= 4 && parts[1] == "com.android.systemui" && parts[3] == "charging_state"
     }
 
     fun reconcile(activeKeys: Set<String>) {

@@ -1,3 +1,4 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -22,10 +23,10 @@ class _PeriodPicker extends StatelessWidget {
     children: [
       Row(
         children: [
-          const Expanded(
+          Expanded(
             child: Center(
               child: Text(
-                'Период уведомлений',
+                tr(context, 'Период уведомлений'),
                 style: TextStyle(
                   fontFamily: titleFont,
                   fontSize: 18,
@@ -36,7 +37,7 @@ class _PeriodPicker extends StatelessWidget {
           ),
         ],
       ),
-      const SizedBox(height: 24),
+      SizedBox(height: 24),
       for (var index = 0; index < periodLabels.length; index++)
         Padding(
           padding: EdgeInsets.only(
@@ -46,46 +47,49 @@ class _PeriodPicker extends StatelessWidget {
             selected: selected == index,
             button: true,
             child: Material(
-              color: selected == index ? accentSurface : Colors.white,
+              color: selected == index
+                  ? ui(context).accentSurface
+                  : ui(context).surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
                 side: BorderSide(
                   color: selected == index
-                      ? accent.withValues(alpha: .5)
-                      : const Color(0xFFECE9F3),
+                      ? ui(context).accent.withValues(alpha: .5)
+                      : ui(context).divider,
                 ),
               ),
               child: InkWell(
                 borderRadius: BorderRadius.circular(20),
                 onTap: () => Navigator.pop(context, index),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   child: Row(
                     children: [
                       Container(
                         width: 40,
                         height: 40,
                         decoration: BoxDecoration(
-                          color: selected == index ? accent : paper,
+                          color: selected == index
+                              ? ui(context).accent
+                              : ui(context).paper,
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Icon(
                           _icons[index],
-                          color: selected == index ? Colors.white : muted,
+                          color: selected == index
+                              ? ui(context).paper
+                              : ui(context).muted,
                           size: 24,
                         ),
                       ),
-                      const SizedBox(width: 10),
+                      SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              periodLabels[index],
-                              style: const TextStyle(
+                              tr(context, periodLabels[index]),
+                              style: TextStyle(
                                 fontFamily: titleFont,
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -94,13 +98,13 @@ class _PeriodPicker extends StatelessWidget {
                           ],
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      SizedBox(width: 8),
                       Icon(
                         selected == index ? Icons.check_rounded : null,
                         size: 24,
                         color: selected == index
-                            ? accent
-                            : const Color(0xFFDAD5E7),
+                            ? ui(context).accent
+                            : ui(context).divider,
                       ),
                     ],
                   ),

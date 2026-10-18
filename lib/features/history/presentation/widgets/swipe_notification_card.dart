@@ -1,3 +1,5 @@
+import 'package:noti_history/core/theme/app_theme.dart';
+import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -5,6 +7,24 @@ import 'package:flutter/services.dart';
 import '../../domain/history_repository.dart';
 import '../../domain/saved_notification.dart';
 import 'notification_card.dart';
+
+/// Lets menu actions reuse the same animation as a swipe without deleting twice.
+class SwipeNotificationHandle {
+  _SwipeNotificationCardState? _state;
+  bool get attached => _state?.mounted == true;
+  Future<void> delete() async {
+    await _state?._delete(1);
+  }
+
+  Future<void> animateOut(Duration delay) async {
+    if (delay > Duration.zero) await Future<void>.delayed(delay);
+    await _state?._animateOut(1);
+  }
+
+  Future<void> restore() async {
+    await _state?._restore();
+  }
+}
 
 class SwipeNotificationCard extends StatefulWidget {
   const SwipeNotificationCard({
@@ -14,8 +34,11 @@ class SwipeNotificationCard extends StatefulWidget {
     required this.openItem,
     required this.onTap,
     required this.onDelete,
-    this.borderRadius = const BorderRadius.all(Radius.circular(20)),
+    this.onLongPress,
+    this.removal,
+    this.borderRadius = BorderRadius.zero,
     this.showTopBorder = true,
+    this.showBottomBorder = true,
     this.bottomSpacing = 10,
   });
 
@@ -24,8 +47,11 @@ class SwipeNotificationCard extends StatefulWidget {
   final ValueNotifier<int?> openItem;
   final VoidCallback onTap;
   final Future<bool> Function() onDelete;
+  final ValueChanged<Offset>? onLongPress;
+  final SwipeNotificationHandle? removal;
   final BorderRadius borderRadius;
   final bool showTopBorder;
+  final bool showBottomBorder;
   final double bottomSpacing;
 
   @override
@@ -47,15 +73,20 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
     _slide = AnimationController.unbounded(vsync: this);
     _collapse = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 210),
+      duration: Duration(milliseconds: 210),
       value: 1,
     );
     widget.openItem.addListener(_handleOpenItemChanged);
+    widget.removal?._state = this;
   }
 
   @override
   void didUpdateWidget(covariant SwipeNotificationCard oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.removal != widget.removal) {
+      if (oldWidget.removal?._state == this) oldWidget.removal?._state = null;
+      widget.removal?._state = this;
+    }
     if (oldWidget.openItem != widget.openItem) {
       oldWidget.openItem.removeListener(_handleOpenItemChanged);
       widget.openItem.addListener(_handleOpenItemChanged);
@@ -71,6 +102,7 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
   Future<void> _settle(double target) async {
     if (!mounted || _deleting) return;
     final distance = (_slide.value - target).abs();
+    if (distance < .1) return;
     final duration = Duration(
       milliseconds: (120 + distance.clamp(0, 180) * .45).round(),
     );
@@ -130,29 +162,47 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
     }
   }
 
+  Future<void> _animateOut(double direction) async {
+    if (_deleting || !mounted) return;
+    _deleting = true;
+    _dragging = false;
+    widget.openItem.value = null;
+    try {
+      await _slide
+          .animateTo(
+            direction * _width,
+            duration: Duration(milliseconds: 220),
+            curve: Curves.easeInCubic,
+          )
+          .orCancel;
+      if (mounted) {
+        await _collapse.animateTo(0, curve: Curves.easeInOutCubic).orCancel;
+      }
+    } on TickerCanceled {
+      /* The row disappeared during a live update. */
+    }
+  }
+
+  Future<void> _restore() async {
+    if (!mounted) return;
+    _deleting = false;
+    _slide.value = 0;
+    await _collapse.animateTo(1, curve: Curves.easeOutCubic);
+  }
+
   Future<void> _delete(double direction) async {
     if (_deleting) return;
-    _deleting = true;
-    widget.openItem.value = null;
     HapticFeedback.mediumImpact();
-    await _slide.animateTo(
-      direction * _width,
-      duration: const Duration(milliseconds: 170),
-      curve: Curves.easeInCubic,
-    );
-    if (!mounted) return;
-    await _collapse.animateTo(0, curve: Curves.easeInOutCubic);
-    final deleted = await widget.onDelete();
-    if (!deleted && mounted) {
-      _deleting = false;
-      _slide.value = 0;
-      await _collapse.animateTo(1, curve: Curves.easeOutCubic);
-    }
+    final commit = widget.onDelete;
+    await _animateOut(direction);
+    final deleted = await commit();
+    if (!deleted && mounted) await _restore();
   }
 
   @override
   void dispose() {
     widget.openItem.removeListener(_handleOpenItemChanged);
+    if (widget.removal?._state == this) widget.removal?._state = null;
     _slide.dispose();
     _collapse.dispose();
     super.dispose();
@@ -171,16 +221,74 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
             borderRadius: widget.borderRadius,
             child: AnimatedBuilder(
               animation: _slide,
+              child: NotificationCard(
+                item: widget.item,
+                repository: widget.repository,
+                onTap: _handleTap,
+                borderRadius: widget.borderRadius,
+                showTopBorder: false,
+                showBottomBorder: widget.showBottomBorder,
+              ),
               builder: (context, child) {
                 return Stack(
                   children: [
+                    if (_slide.value.abs() > .1)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: ColoredBox(
+                            key: ValueKey(
+                              'swipe-delete-background-${widget.item.id}',
+                            ),
+                            color: ui(context).deleteSurface,
+                            child: Align(
+                              alignment: _slide.value > 0
+                                  ? Alignment.centerLeft
+                                  : Alignment.centerRight,
+                              child: SizedBox(
+                                width: _slide.value.abs().clamp(0.0, _width),
+                                height: double.infinity,
+                                child: AnimatedAlign(
+                                  key: ValueKey(
+                                    'swipe-delete-icon-position-${widget.item.id}',
+                                  ),
+                                  duration: Duration(milliseconds: 180),
+                                  curve: Curves.easeOutCubic,
+                                  alignment: _slide.value.abs() >= _width * .5
+                                      ? Alignment.center
+                                      : _slide.value > 0
+                                      ? Alignment.centerLeft
+                                      : Alignment.centerRight,
+                                  child: Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 20,
+                                    ),
+                                    child: Opacity(
+                                      opacity: (_slide.value.abs() / 64).clamp(
+                                        0.0,
+                                        1.0,
+                                      ),
+                                      child: Icon(
+                                        Icons.delete_outline_rounded,
+                                        color: ui(context).deleteInk,
+                                        size: 28,
+                                        semanticLabel: tr(
+                                          context,
+                                          'Удалить уведомление',
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     Transform.translate(
                       offset: Offset(_slide.value, 0),
                       child: MediaQuery(
                         data: MediaQuery.of(context).copyWith(
-                          gestureSettings: const DeviceGestureSettings(
-                            touchSlop: 10,
-                          ),
+                          gestureSettings: DeviceGestureSettings(touchSlop: 10),
                         ),
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
@@ -189,13 +297,15 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
                           onHorizontalDragUpdate: _dragUpdate,
                           onHorizontalDragEnd: _dragEnd,
                           onHorizontalDragCancel: _dragCancel,
-                          child: NotificationCard(
-                            item: widget.item,
-                            repository: widget.repository,
-                            onTap: _handleTap,
-                            borderRadius: widget.borderRadius,
-                            showTopBorder: widget.showTopBorder,
-                          ),
+                          onLongPressStart: widget.onLongPress == null
+                              ? null
+                              : (details) {
+                                  if (_deleting) return;
+                                  HapticFeedback.selectionClick();
+                                  widget.openItem.value = null;
+                                  widget.onLongPress!(details.globalPosition);
+                                },
+                          child: child,
                         ),
                       ),
                     ),

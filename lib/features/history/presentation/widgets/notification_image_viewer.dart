@@ -1,3 +1,4 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -13,15 +14,14 @@ Future<void> openNotificationImageViewer(
 }) => Navigator.of(context).push<void>(
   PageRouteBuilder<void>(
     opaque: false,
-    transitionDuration: const Duration(milliseconds: 320),
+    transitionDuration: Duration.zero,
     reverseTransitionDuration: Duration.zero,
     pageBuilder: (_, _, _) => NotificationImageViewer(
       bytes: bytes,
       item: item,
       sourceRect: sourceRect,
     ),
-    transitionsBuilder: (_, animation, _, child) =>
-        FadeTransition(opacity: animation, child: child),
+    transitionsBuilder: (_, _, _, child) => child,
   ),
 );
 
@@ -47,6 +47,7 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
   late final AnimationController _zoomAnimation;
   late final AnimationController _motionAnimation;
   late final AnimationController _returnAnimation;
+  late final AnimationController _entryAnimation;
   Animation<Rect?>? _returnRect;
   Animation<Matrix4>? _matrix;
   Animation<Offset>? _motion;
@@ -63,23 +64,30 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
   void initState() {
     super.initState();
     _zoomAnimation =
-        AnimationController(
-          vsync: this,
-          duration: const Duration(milliseconds: 280),
-        )..addListener(() {
-          if (_matrix != null) _transform.value = _matrix!.value;
-        });
+        AnimationController(vsync: this, duration: Duration(milliseconds: 280))
+          ..addListener(() {
+            if (_matrix != null) _transform.value = _matrix!.value;
+          });
     _motionAnimation =
-        AnimationController(
-          vsync: this,
-          duration: const Duration(milliseconds: 220),
-        )..addListener(() {
-          if (_motion != null) setState(() => _drag = _motion!.value);
-        });
+        AnimationController(vsync: this, duration: Duration(milliseconds: 220))
+          ..addListener(() {
+            if (_motion != null) setState(() => _drag = _motion!.value);
+          });
     _returnAnimation = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 320),
+      duration: Duration(milliseconds: 320),
     )..addListener(() => setState(() {}));
+    _entryAnimation = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: 320),
+    )..addListener(() => setState(() {}));
+    if (widget.sourceRect == null) {
+      _entryAnimation.value = 1;
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _entryAnimation.forward();
+      });
+    }
     _transform.addListener(_scaleChanged);
     _systemBars(false);
   }
@@ -88,7 +96,7 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       try {
-        await const MethodChannel('notihistory/history')
+        await MethodChannel('notihistory/history')
             .invokeMethod<void>('imageFullscreen', {'hidden': hidden});
       } on PlatformException {
         /* Keep the edge-to-edge viewer usable. */
@@ -152,13 +160,25 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
     _zoomAnimation.stop();
     _motionAnimation.stop();
     final scale = 1 - (_drag.distance / 350).clamp(0.0, 1.0) * .12;
+    final entryRect = widget.sourceRect == null
+        ? _imageRect
+        : Rect.lerp(
+            widget.sourceRect,
+            _imageRect,
+            Curves.easeInOutCubic.transform(_entryAnimation.value),
+          )!;
+    final fitted = _entryAnimation.isCompleted ? _imageRect : entryRect;
+    _entryAnimation.stop();
+    final transformed = MatrixUtils.transformRect(_transform.value, fitted);
+    final center = _viewport.center(Offset.zero);
     final start = Rect.fromCenter(
-      center: _viewport.center(Offset.zero) + _drag,
-      width: _viewport.width * scale,
-      height: _viewport.height * scale,
+      center: center + (transformed.center - center) * scale + _drag,
+      width: transformed.width * scale,
+      height: transformed.height * scale,
     );
     final target = widget.sourceRect;
     if (target == null) {
+      setState(() => _closing = true);
       Navigator.pop(context);
       return;
     }
@@ -205,6 +225,7 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
 
   @override
   void dispose() {
+    _entryAnimation.dispose();
     _returnAnimation.dispose();
     _zoomAnimation.dispose();
     _motionAnimation.dispose();
@@ -214,11 +235,36 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
     super.dispose();
   }
 
+  Rect get _imageRect {
+    final source = widget.sourceRect;
+    if (source == null) return Offset.zero & _viewport;
+    final fitted = applyBoxFit(
+      BoxFit.contain,
+      source.size,
+      _viewport,
+    ).destination;
+    return Rect.fromCenter(
+      center: _viewport.center(Offset.zero),
+      width: fitted.width,
+      height: fitted.height,
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => PopScope<void>(
+    canPop: _closing,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) _closeToSource();
+    },
+    child: _buildViewer(context),
+  );
+
+  Widget _buildViewer(BuildContext context) {
+    _viewport = MediaQuery.sizeOf(context);
+    final entry = Curves.easeInOutCubic.transform(_entryAnimation.value);
     final progress = (_drag.distance / 350).clamp(0.0, 1.0);
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: const SystemUiOverlayStyle(
+      value: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarIconBrightness: Brightness.light,
         statusBarBrightness: Brightness.dark,
@@ -235,11 +281,14 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
             Positioned.fill(
               child: ColoredBox(
                 color: Colors.black.withValues(
-                  alpha: (1 - progress * .9) * (1 - _returnAnimation.value),
+                  alpha:
+                      entry *
+                      (1 - progress * .9) *
+                      (1 - _returnAnimation.value),
                 ),
               ),
             ),
-            if (!_closing)
+            if (!_closing && _entryAnimation.isCompleted)
               Positioned.fill(
                 child: LayoutBuilder(
                   builder: (context, constraints) {
@@ -267,9 +316,12 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
                                 widget.bytes,
                                 fit: BoxFit.contain,
                                 filterQuality: FilterQuality.high,
-                                errorBuilder: (_, _, _) => const Center(
+                                errorBuilder: (_, _, _) => Center(
                                   child: Text(
-                                    'Не удалось открыть изображение',
+                                    tr(
+                                      context,
+                                      'Не удалось открыть изображение',
+                                    ),
                                     style: TextStyle(color: Colors.white),
                                   ),
                                 ),
@@ -282,8 +334,24 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
                   },
                 ),
               ),
+            if (!_closing &&
+                !_entryAnimation.isCompleted &&
+                widget.sourceRect != null)
+              Positioned.fromRect(
+                key: ValueKey('image-viewer-flight'),
+                rect: Rect.lerp(widget.sourceRect, _imageRect, entry)!,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12 * (1 - entry)),
+                  child: Image.memory(
+                    widget.bytes,
+                    fit: BoxFit.contain,
+                    filterQuality: FilterQuality.high,
+                  ),
+                ),
+              ),
             if (_closing && _returnRect?.value != null)
               Positioned.fromRect(
+                key: ValueKey('image-viewer-flight'),
                 rect: _returnRect!.value!,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(
@@ -303,10 +371,10 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
               child: IgnorePointer(
                 ignoring: !_chrome || _closing,
                 child: AnimatedOpacity(
-                  opacity: _chrome && !_closing ? (1 - progress) : 0,
-                  duration: const Duration(milliseconds: 180),
+                  opacity: _chrome && !_closing ? entry * (1 - progress) : 0,
+                  duration: Duration(milliseconds: 180),
                   child: DecoratedBox(
-                    decoration: const BoxDecoration(
+                    decoration: BoxDecoration(
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
@@ -316,7 +384,7 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
                     child: SafeArea(
                       bottom: false,
                       child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 12, 12, 24),
+                        padding: EdgeInsets.fromLTRB(20, 12, 12, 24),
                         child: Row(
                           children: [
                             Expanded(
@@ -327,16 +395,16 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
                                     widget.item.appName,
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: Colors.white,
                                       fontSize: 17,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
+                                  SizedBox(height: 4),
                                   Text(
                                     '${fullDate(widget.item.postedAt)} · ${notificationTime(widget.item.postedAt)}',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: Color(0xFFCECAD8),
                                       fontSize: 12,
                                     ),
@@ -345,13 +413,13 @@ class _NotificationImageViewerState extends State<NotificationImageViewer>
                               ),
                             ),
                             IconButton.filledTonal(
-                              tooltip: 'Закрыть изображение',
+                              tooltip: tr(context, 'Закрыть изображение'),
                               style: IconButton.styleFrom(
-                                backgroundColor: const Color(0x663C354D),
+                                backgroundColor: Color(0x663C354D),
                                 foregroundColor: Colors.white,
                               ),
                               onPressed: _closeToSource,
-                              icon: const Icon(Icons.close_rounded),
+                              icon: Icon(Icons.close_rounded),
                             ),
                           ],
                         ),

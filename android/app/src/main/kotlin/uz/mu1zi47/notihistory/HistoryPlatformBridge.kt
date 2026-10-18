@@ -24,6 +24,35 @@ class HistoryPlatformBridge(private val activity: Activity, messenger: BinaryMes
         })
         methods.setMethodCallHandler { call, result ->
             when (call.method) {
+                "appVersion" -> {
+                    @Suppress("DEPRECATION")
+                    val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
+                    result.success(info.versionName)
+                }
+                "appPreferences" -> {
+                    val preferences = activity.getSharedPreferences("app_preferences", 0)
+                    result.success(mapOf("language" to preferences.getString("language", null), "theme" to preferences.getString("theme", "system")))
+                }
+                "setAppPreferences" -> async(HistoryRuntime.worker, result) {
+                    val language = call.argument<String>("language") ?: error("Missing language")
+                    val theme = call.argument<String>("theme") ?: error("Missing theme")
+                    require(language in listOf("ru", "en") && theme in listOf("system", "light", "dark"))
+                    check(activity.getSharedPreferences("app_preferences", 0).edit().putString("language", language).putString("theme", theme).commit())
+                    null
+                }
+                "captureApps" -> async(HistoryRuntime.worker, result) {
+                    CaptureSettings(activity.applicationContext).apps(HistoryRuntime.store(activity))
+                }
+                "enableAllCaptureApps" -> async(HistoryRuntime.worker, result) {
+                    CaptureSettings(activity.applicationContext).enableAll()
+                    null
+                }
+                "setCaptureEnabled" -> async(HistoryRuntime.worker, result) {
+                    val packageName = call.argument<String>("packageName") ?: error("Missing package")
+                    val enabled = call.argument<Boolean>("enabled") ?: error("Missing enabled")
+                    CaptureSettings(activity.applicationContext).setEnabled(packageName, enabled)
+                    null
+                }
                 "imageFullscreen" -> {
                     val hidden = call.argument<Boolean>("hidden") == true
                     if (android.os.Build.VERSION.SDK_INT >= 30) {
@@ -91,6 +120,10 @@ class HistoryPlatformBridge(private val activity: Activity, messenger: BinaryMes
                     val id = call.argument<Number>("id")?.toLong()
                         ?: throw IllegalArgumentException("Missing notification id")
                     HistoryRuntime.store(activity).delete(id); HistoryRuntime.notifyChanged(); null
+                }
+                "notification" -> async(HistoryRuntime.reader, result) {
+                    val id = call.argument<Number>("id")?.toLong() ?: error("Missing id")
+                    HistoryRuntime.store(activity).notification(id)
                 }
                 "image" -> async(HistoryRuntime.reader, result) {
                     val id = call.argument<Number>("id")?.toLong() ?: throw IllegalArgumentException("Missing id")

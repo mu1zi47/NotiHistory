@@ -18,12 +18,19 @@ class AppAvatar extends StatelessWidget {
   Widget build(BuildContext context) => FutureBuilder(
     future: repository.icon(app.packageName),
     builder: (context, snapshot) {
-      final colors = [
-        const Color(0xFFE9E3FB),
-        const Color(0xFFE0F1EC),
-        const Color(0xFFE1EDFC),
-        const Color(0xFFFFE9DE),
-      ];
+      final colors = ui(context).dark
+          ? const [
+              Color(0xFF342A4B),
+              Color(0xFF203B35),
+              Color(0xFF253348),
+              Color(0xFF442F29),
+            ]
+          : [
+              Color(0xFFE9E3FB),
+              Color(0xFFE0F1EC),
+              Color(0xFFE1EDFC),
+              Color(0xFFFFE9DE),
+            ];
       final fallback = Container(
         width: size,
         height: size,
@@ -38,7 +45,7 @@ class AppAvatar extends StatelessWidget {
           app.name.isEmpty ? '?' : app.name.characters.first.toUpperCase(),
           style: TextStyle(
             fontFamily: titleFont,
-            color: accent,
+            color: ui(context).accent,
             fontSize: size * .4,
             fontWeight: FontWeight.w700,
           ),

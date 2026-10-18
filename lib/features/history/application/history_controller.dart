@@ -166,6 +166,18 @@ class HistoryController extends ChangeNotifier {
       if (!_current(generation)) return;
       if (refreshStatus) _status = results.first as CaptureStatus;
       final page = results.last as HistoryPage;
+      if (refreshOverview) {
+        _apps = List.unmodifiable(page.apps);
+        _total = page.total;
+        _hasOverview = true;
+        final available = _apps.map((app) => app.packageName).toSet();
+        final selected = _packageNames.intersection(available);
+        if (!_samePackages(selected, _packageNames)) {
+          _packageNames = Set.unmodifiable(selected);
+          await refresh(includeOverview: false, readStatus: false);
+          return;
+        }
+      }
       final overlaps =
           page.items.isNotEmpty &&
           oldItems.any((old) => old.id == page.items.last.id);
@@ -184,11 +196,6 @@ class HistoryController extends ChangeNotifier {
         _hasMore = page.hasMore;
       }
       _matched = page.matched;
-      if (refreshOverview) {
-        _apps = List.unmodifiable(page.apps);
-        _total = page.total;
-        _hasOverview = true;
-      }
     } catch (_) {
       if (_current(generation)) {
         _error = 'Не удалось загрузить историю. Попробуйте ещё раз.';
@@ -238,7 +245,7 @@ class HistoryController extends ChangeNotifier {
     await repository.openAccess();
   }
 
-  Future<void> clear() async {
+  Future<void> clear({String? packageName}) async {
     if (_clearing || _disposed) return;
     _searchTimer?.cancel();
     _changeTimer?.cancel();
@@ -248,9 +255,9 @@ class HistoryController extends ChangeNotifier {
     _emit();
     try {
       await repository.clear(
-        search: _search,
-        packageNames: _packageNames,
-        since: _since,
+        search: packageName == null ? _search : '',
+        packageNames: packageName == null ? _packageNames : {packageName},
+        since: packageName == null ? _since : 0,
       );
       if (_disposed) return;
       _items = const [];
@@ -286,10 +293,13 @@ class HistoryController extends ChangeNotifier {
         else if (app.count > 1)
           SavedApp(app.packageName, app.name, app.count - 1),
     ]);
-    if (!_apps.any((app) => app.packageName == removed.packageName)) {
+    if (_packageNames.contains(removed.packageName) &&
+        !_apps.any((app) => app.packageName == removed.packageName)) {
       _packageNames = Set.unmodifiable(
         _packageNames.where((name) => name != removed.packageName),
       );
+      await refresh(includeOverview: false, readStatus: false);
+      return;
     }
     _emit();
   }

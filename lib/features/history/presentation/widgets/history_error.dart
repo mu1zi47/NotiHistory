@@ -1,3 +1,5 @@
+import 'package:noti_history/core/theme/app_theme.dart';
+import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 
 class HistoryError extends StatelessWidget {
@@ -6,18 +8,21 @@ class HistoryError extends StatelessWidget {
   final VoidCallback onRetry;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
+    padding: EdgeInsets.only(bottom: 12),
     child: Material(
-      color: const Color(0xFFFFEFEF),
+      color: ui(context).deleteSurface,
       borderRadius: BorderRadius.circular(14),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: EdgeInsets.all(12),
         child: Row(
           children: [
             Expanded(
-              child: Text(message, style: const TextStyle(fontSize: 12)),
+              child: Text(tr(context, message), style: TextStyle(fontSize: 12)),
             ),
-            TextButton(onPressed: onRetry, child: const Text('Повторить')),
+            TextButton(
+              onPressed: onRetry,
+              child: Text(tr(context, 'Повторить')),
+            ),
           ],
         ),
       ),

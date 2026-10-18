@@ -1,3 +1,4 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
@@ -15,9 +16,9 @@ class PeriodFilterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
-    label: 'Выбрать период',
+    label: tr(context, 'Выбрать период'),
     child: Material(
-      color: accentSurface,
+      color: ui(context).accentSurface,
       borderRadius: BorderRadius.circular(actionRadius),
       child: InkWell(
         borderRadius: BorderRadius.circular(actionRadius),
@@ -26,26 +27,30 @@ class PeriodFilterButton extends StatelessWidget {
           if (value != null && context.mounted) onSelected(value);
         },
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 13),
+          padding: EdgeInsets.symmetric(horizontal: 8, vertical: 13),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
+              Icon(
                 Icons.calendar_month_outlined,
                 size: 16,
-                color: accent,
+                color: ui(context).accent,
               ),
-              const SizedBox(width: 4),
+              SizedBox(width: 4),
               Text(
-                periodLabels[selected],
-                style: const TextStyle(
-                  color: accent,
+                tr(context, periodLabels[selected]),
+                style: TextStyle(
+                  color: ui(context).accent,
                   fontSize: 10,
                   fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(width: 3),
-              const Icon(Icons.expand_more_rounded, size: 16, color: accent),
+              SizedBox(width: 3),
+              Icon(
+                Icons.expand_more_rounded,
+                size: 16,
+                color: ui(context).accent,
+              ),
             ],
           ),
         ),

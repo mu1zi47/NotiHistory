@@ -136,20 +136,84 @@ void main() {
     expect(c.clearing, false);
   });
 
-  test('Clear deletes only matching apps and preserves the filter', () async {
-    final repo = MemoryRepository();
-    final c = HistoryController(repo);
-    addTearDown(c.dispose);
-    await c.start();
-    await c.setPackages({'org.telegram'});
-    await c.clear();
-    expect(repo.entries.map((entry) => entry.packageName), ['com.mail']);
-    expect(c.packageNames, {'org.telegram'});
-    expect(c.items, isEmpty);
-    expect(c.total, 1);
-    await c.resetFilters();
-    expect(c.items.single.packageName, 'com.mail');
-  });
+  test(
+    'Clear deletes only matching apps and resets an absent app filter',
+    () async {
+      final repo = MemoryRepository();
+      final c = HistoryController(repo);
+      addTearDown(c.dispose);
+      await c.start();
+      await c.setPackages({'org.telegram'});
+      await c.clear();
+      expect(repo.entries.map((entry) => entry.packageName), ['com.mail']);
+      expect(c.packageNames, isEmpty);
+      expect(c.total, 1);
+      expect(c.matched, 1);
+      expect(c.items.single.packageName, 'com.mail');
+    },
+  );
+
+  test(
+    'Deleting the last selected app notification refreshes the remaining feed',
+    () async {
+      final repo = MemoryRepository();
+      final c = HistoryController(repo);
+      addTearDown(c.dispose);
+      await c.start();
+      await c.setPackages({'org.telegram'});
+      await c.delete(2);
+      expect(c.packageNames, isEmpty);
+      expect(c.items.single.packageName, 'com.mail');
+      expect(c.matched, 1);
+    },
+  );
+
+  test(
+    'Clear keeps selected apps that still have history and keeps search',
+    () async {
+      final repo = MemoryRepository();
+      final c = HistoryController(repo);
+      addTearDown(c.dispose);
+      await c.start();
+      await c.setPackages({'org.telegram', 'com.mail'});
+      c.setSearch('кофейни');
+      await c.clear();
+      expect(c.packageNames, {'com.mail'});
+      expect(c.search, 'кофейни');
+      expect(c.items, isEmpty);
+      expect(c.apps.single.packageName, 'com.mail');
+    },
+  );
+
+  test(
+    'App menu clear ignores search and period but preserves other apps',
+    () async {
+      final repo = MemoryRepository();
+      final now = DateTime.now();
+      repo.entries.add(
+        SavedNotification(
+          id: 3,
+          packageName: 'org.telegram',
+          appName: 'Telegram',
+          title: 'Old',
+          body: 'not matching',
+          subText: '',
+          postedAt: now.subtract(const Duration(days: 2)),
+          savedAt: now.subtract(const Duration(days: 2)),
+        ),
+      );
+      final c = HistoryController(repo);
+      addTearDown(c.dispose);
+      await c.start();
+      await c.setPeriod(1);
+      c.setSearch('кофейни');
+      await c.clear(packageName: 'org.telegram');
+      expect(repo.entries.single.packageName, 'com.mail');
+      expect(c.search, 'кофейни');
+      expect(c.period, 1);
+      expect(c.apps.single.packageName, 'com.mail');
+    },
+  );
 
   test('Deleting removes one item and updates overview counts', () async {
     final repo = MemoryRepository();

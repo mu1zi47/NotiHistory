@@ -1,3 +1,5 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
+
 import 'dart:async';
 
 import 'package:flutter/services.dart';
@@ -22,6 +24,7 @@ void showNotificationDetails(
   showHistorySheet<void>(
     context,
     (_) => _NotificationDetails(item: item, repository: repository),
+    enableDrag: false,
   );
 }
 
@@ -40,21 +43,22 @@ class _NotificationDetailsState extends State<_NotificationDetails>
   bool _opening = false;
   int _checkGeneration = 0;
   StreamSubscription<void>? _changes;
-  SavedNotification get item => widget.item;
+  late SavedNotification item;
   HistoryRepository get repository => widget.repository;
 
   @override
   void initState() {
     super.initState();
+    item = widget.item;
     WidgetsBinding.instance.addObserver(this);
     _changes = repository.changes.listen(
-      (_) => _checkAvailability(),
+      (_) => _checkAvailability(refreshContent: true),
       onError: (_) {},
     );
     _checkAvailability();
   }
 
-  Future<void> _checkAvailability() async {
+  Future<void> _checkAvailability({bool refreshContent = false}) async {
     final generation = ++_checkGeneration;
     bool available;
     try {
@@ -65,14 +69,25 @@ class _NotificationDetailsState extends State<_NotificationDetails>
     } catch (_) {
       available = false;
     }
+    SavedNotification? updated;
+    if (refreshContent) {
+      try {
+        updated = await repository.notification(item.id);
+      } catch (_) {}
+    }
     if (mounted && generation == _checkGeneration) {
-      setState(() => _available = available);
+      setState(() {
+        _available = available;
+        if (updated != null) item = updated;
+      });
     }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _checkAvailability();
+    if (state == AppLifecycleState.resumed) {
+      _checkAvailability(refreshContent: true);
+    }
   }
 
   Future<void> _open() async {
@@ -87,8 +102,8 @@ class _NotificationDetailsState extends State<_NotificationDetails>
       showAppToast(
         context,
         error is PlatformException
-            ? error.message ?? 'Переход недоступен.'
-            : 'Переход недоступен.',
+            ? tr(context, error.message ?? 'Переход недоступен.')
+            : tr(context, 'Переход недоступен.'),
         error: true,
       );
     } finally {
@@ -105,67 +120,96 @@ class _NotificationDetailsState extends State<_NotificationDetails>
 
   @override
   Widget build(BuildContext context) => HistorySheet(
-    children: [
-      Row(
-        children: [
-          AppAvatar(
-            app: SavedApp(item.packageName, item.appName, 0),
-            repository: repository,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      item.appName,
-                      style: const TextStyle(
-                        fontFamily: titleFont,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    Text(
-                      item.packageName,
-                      style: const TextStyle(fontSize: 11, color: muted),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '${fullDate(item.postedAt)} · ${notificationTime(item.postedAt)}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+    viewportRadius: 0,
+    header: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            AppAvatar(
+              app: SavedApp(item.packageName, item.appName, 0),
+              repository: repository,
             ),
-          ),
-        ],
-      ),
-      const SizedBox(height: 24),
-      SelectableText(
-        item.title.isEmpty ? item.appName : item.title,
-        style: const TextStyle(
-          fontFamily: titleFont,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          height: 1.4,
+            SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        item.appName,
+                        style: TextStyle(
+                          fontFamily: titleFont,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        item.packageName,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: ui(context).muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 4),
+                  Text(
+                    '${fullDate(item.postedAt)} · ${notificationTime(item.postedAt)}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: ui(context).muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-      ),
-      const SizedBox(height: 8),
+        SizedBox(height: 16),
+        SelectableText(
+          item.title.isEmpty ? item.appName : item.title,
+          style: TextStyle(
+            fontFamily: titleFont,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            height: 1.4,
+          ),
+        ),
+        SizedBox(height: 8),
+      ],
+    ),
+    footer: Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: CopyNotificationButton(
+            text: [item.title, item.body].where((s) => s.isNotEmpty).join('\n'),
+          ),
+        ),
+        SizedBox(width: 8),
+        Expanded(
+          flex: 2,
+          child: FilledButton.icon(
+            onPressed: _available && !_opening ? _open : null,
+            icon: Icon(Icons.open_in_new_rounded, size: 18),
+            label: Text(tr(context, 'Перейти')),
+          ),
+        ),
+      ],
+    ),
+    children: [
       SelectableText(
         item.body.isEmpty
-            ? 'Android не передал текст этого уведомления.'
-            : item.body,
-        style: const TextStyle(
+            ? tr(context, 'Android не передал текст этого уведомления.')
+            : item.body.replaceAll(RegExp(r'\n(?=[^\n:]{1,80}: )'), '\n\n'),
+        textAlign: TextAlign.left,
+        style: TextStyle(
           fontFamily: bodyFont,
           fontSize: 14,
           fontWeight: FontWeight.w600,
@@ -173,29 +217,6 @@ class _NotificationDetailsState extends State<_NotificationDetails>
         ),
       ),
       if (item.hasImage) NotificationImage(item: item, repository: repository),
-      const SizedBox(height: 16),
-      Row(
-        children: [
-          Expanded(
-            flex: 3,
-            child: CopyNotificationButton(
-              text: [
-                item.title,
-                item.body,
-              ].where((s) => s.isNotEmpty).join('\n'),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            flex: 2,
-            child: FilledButton.icon(
-              onPressed: _available && !_opening ? _open : null,
-              icon: const Icon(Icons.open_in_new_rounded, size: 18),
-              label: const Text('Перейти'),
-            ),
-          ),
-        ],
-      ),
     ],
   );
 }

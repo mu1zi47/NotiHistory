@@ -1,3 +1,4 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -10,6 +11,10 @@ import 'clear_history_dialog.dart';
 import 'notification_details.dart';
 import 'widgets/history_actions.dart';
 import 'widgets/history_feed.dart';
+import '../domain/saved_notification.dart';
+import '../../settings/capture_settings_repository.dart';
+import 'notification_actions_menu.dart';
+import '../../settings/settings_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key, required this.repository});
@@ -23,6 +28,8 @@ class _HistoryScreenState extends State<HistoryScreen>
   late final HistoryController _controller;
   final _search = TextEditingController();
   final _scroll = ScrollController();
+  final _feedKey = GlobalKey<HistoryFeedState>();
+  bool _actionInProgress = false;
   final _openSwipe = ValueNotifier<int?>(null);
   @override
   void initState() {
@@ -49,7 +56,8 @@ class _HistoryScreenState extends State<HistoryScreen>
     try {
       await _controller.openAccess();
     } catch (_) {
-      _toast('Не удалось открыть настройки Android.', error: true);
+      if (!mounted) return;
+      _toast(tr(context, 'Не удалось открыть настройки Android.'), error: true);
     }
   }
 
@@ -62,9 +70,13 @@ class _HistoryScreenState extends State<HistoryScreen>
     try {
       await _controller.clear();
       if (!mounted) return;
-      _toast('История очищена');
+      _toast(tr(context, 'История очищена'));
     } catch (_) {
-      _toast('Не удалось очистить историю. Попробуйте снова.', error: true);
+      if (!mounted) return;
+      _toast(
+        tr(context, 'Не удалось очистить историю. Попробуйте снова.'),
+        error: true,
+      );
     }
   }
 
@@ -75,6 +87,13 @@ class _HistoryScreenState extends State<HistoryScreen>
       apps: _controller.apps,
       selected: _controller.packageNames,
       repository: _controller.repository,
+      deleteApp: (app) async {
+        await _controller.clear(packageName: app.packageName);
+        if (mounted) {
+          _toast(tr(context, 'Уведомления от «{0}» удалены', [app.name]));
+        }
+        return _controller.apps;
+      },
     );
     if (selected != null && mounted) await _controller.setPackages(selected);
   }
@@ -84,8 +103,82 @@ class _HistoryScreenState extends State<HistoryScreen>
       await _controller.delete(id);
       return true;
     } catch (_) {
-      _toast('Не удалось удалить уведомление. Попробуйте снова.', error: true);
+      if (!mounted) return false;
+      _toast(
+        tr(context, 'Не удалось удалить уведомление. Попробуйте снова.'),
+        error: true,
+      );
       return false;
+    }
+  }
+
+  Future<void> _notificationActions(
+    SavedNotification item,
+    Offset position,
+  ) async {
+    if (_actionInProgress) return;
+    final action = await showNotificationActionsMenu(
+      context,
+      position,
+      item.appName,
+    );
+    if (!mounted || action == null) return;
+    switch (action) {
+      case NotificationAction.delete:
+        _actionInProgress = true;
+        try {
+          final feed = _feedKey.currentState;
+          if (feed != null) {
+            await feed.deleteNotification(item.id);
+          } else {
+            await _delete(item.id);
+          }
+        } finally {
+          _actionInProgress = false;
+        }
+      case NotificationAction.clearApp:
+        if (!await confirmClearHistory(context, appName: item.appName) ||
+            !mounted) {
+          return;
+        }
+        _actionInProgress = true;
+        try {
+          final feed = _feedKey.currentState;
+          if (feed != null) {
+            await feed.removeApp(
+              item.packageName,
+              () => _controller.clear(packageName: item.packageName),
+            );
+          } else {
+            await _controller.clear(packageName: item.packageName);
+          }
+          if (mounted) {
+            _toast(tr(context, 'Уведомления от «{0}» удалены', [item.appName]));
+          }
+        } catch (_) {
+          if (!mounted) return;
+          _toast(
+            tr(context, 'Не удалось удалить уведомления. Попробуйте снова.'),
+            error: true,
+          );
+        } finally {
+          _actionInProgress = false;
+        }
+      case NotificationAction.disableApp:
+        try {
+          await CaptureSettingsRepository().setEnabled(item.packageName, false);
+          if (mounted) {
+            _toast(
+              tr(context, 'Сохранение от «{0}» выключено', [item.appName]),
+            );
+          }
+        } catch (_) {
+          if (!mounted) return;
+          _toast(
+            tr(context, 'Не удалось изменить настройку. Попробуйте снова.'),
+            error: true,
+          );
+        }
     }
   }
 
@@ -101,11 +194,13 @@ class _HistoryScreenState extends State<HistoryScreen>
 
   @override
   Widget build(BuildContext context) => AnnotatedRegion<SystemUiOverlayStyle>(
-    value: transparentSystemBars,
+    value: Theme.of(context).brightness == Brightness.dark
+        ? transparentDarkSystemBars
+        : transparentSystemBars,
     child: Scaffold(
       resizeToAvoidBottomInset: false,
       bottomNavigationBar: AnimatedPadding(
-        duration: const Duration(milliseconds: 220),
+        duration: Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,
         padding: EdgeInsets.only(
           bottom: MediaQuery.viewInsetsOf(context).bottom,
@@ -113,14 +208,14 @@ class _HistoryScreenState extends State<HistoryScreen>
         child: SafeArea(
           top: false,
           child: Material(
-            key: const ValueKey('history-bottom-actions'),
+            key: ValueKey('history-bottom-actions'),
             color: Theme.of(context).scaffoldBackgroundColor,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
+              padding: EdgeInsets.fromLTRB(16, 8, 16, 10),
               child: Center(
                 heightFactor: 1,
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 728),
+                  constraints: BoxConstraints(maxWidth: 728),
                   child: ListenableBuilder(
                     listenable: _controller,
                     builder: (context, _) => HistoryActions(
@@ -148,13 +243,21 @@ class _HistoryScreenState extends State<HistoryScreen>
         bottom: false,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 760),
+            constraints: BoxConstraints(maxWidth: 760),
             child: HistoryFeed(
+              key: _feedKey,
               controller: _controller,
               scroll: _scroll,
               openSwipe: _openSwipe,
               onDelete: _delete,
+              onLongPress: _notificationActions,
               onAccess: _access,
+              onSettings: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      SettingsScreen(historyRepository: widget.repository),
+                ),
+              ),
               onResetFilters: () {
                 _search.clear();
                 _controller.resetFilters();

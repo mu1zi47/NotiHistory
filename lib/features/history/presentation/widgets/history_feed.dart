@@ -1,9 +1,13 @@
+import 'package:noti_history/core/l10n/app_strings.dart';
+
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../../../../core/theme/app_theme.dart';
+import '../../../../core/widgets/list_corners_painter.dart';
 import '../../../../core/formatting/notification_date.dart';
 import '../../application/history_controller.dart';
 import '../../domain/saved_notification.dart';
@@ -23,19 +27,23 @@ class HistoryFeed extends StatefulWidget {
     required this.onAccess,
     required this.onResetFilters,
     required this.onDetails,
+    this.onSettings,
+    this.onLongPress,
   });
   final HistoryController controller;
   final ScrollController scroll;
   final ValueNotifier<int?> openSwipe;
   final VoidCallback onAccess, onResetFilters;
+  final VoidCallback? onSettings;
+  final void Function(SavedNotification item, Offset position)? onLongPress;
   final Future<bool> Function(int id) onDelete;
   final ValueChanged<SavedNotification> onDetails;
 
   @override
-  State<HistoryFeed> createState() => _HistoryFeedState();
+  State<HistoryFeed> createState() => HistoryFeedState();
 }
 
-class _HistoryFeedState extends State<HistoryFeed>
+class HistoryFeedState extends State<HistoryFeed>
     with TickerProviderStateMixin {
   late final AnimationController _refreshOffset;
   late final AnimationController _refreshSpin;
@@ -50,7 +58,7 @@ class _HistoryFeedState extends State<HistoryFeed>
       });
     _refreshSpin = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: Duration(milliseconds: 900),
     );
   }
 
@@ -85,7 +93,7 @@ class _HistoryFeedState extends State<HistoryFeed>
       } else {
         _refreshOffset.animateTo(
           0,
-          duration: const Duration(milliseconds: 220),
+          duration: Duration(milliseconds: 220),
           curve: Curves.easeOutCubic,
         );
       }
@@ -102,19 +110,19 @@ class _HistoryFeedState extends State<HistoryFeed>
       await _refreshOffset
           .animateTo(
             60,
-            duration: const Duration(milliseconds: 160),
+            duration: Duration(milliseconds: 160),
             curve: Curves.easeOutCubic,
           )
           .orCancel;
       await controller.refresh(preserveItems: true);
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await Future<void>.delayed(Duration(milliseconds: 200));
     } on TickerCanceled {
       return;
     } finally {
       if (mounted) {
         await _refreshOffset.animateTo(
           0,
-          duration: const Duration(milliseconds: 240),
+          duration: Duration(milliseconds: 240),
           curve: Curves.easeInOutCubic,
         );
         if (mounted) {
@@ -127,7 +135,7 @@ class _HistoryFeedState extends State<HistoryFeed>
 
   Widget _refreshIndicator() => ClipRect(
     child: SizedBox(
-      key: const ValueKey('custom-refresh-gap'),
+      key: ValueKey('custom-refresh-gap'),
       height: _refreshOffset.value,
       child: Center(
         child: Transform.scale(
@@ -136,13 +144,13 @@ class _HistoryFeedState extends State<HistoryFeed>
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: ui(context).surface,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: accent.withValues(alpha: .12),
+                  color: ui(context).accent.withValues(alpha: .12),
                   blurRadius: 12,
-                  offset: const Offset(0, 3),
+                  offset: Offset(0, 3),
                 ),
               ],
             ),
@@ -167,6 +175,78 @@ class _HistoryFeedState extends State<HistoryFeed>
     _refreshOffset.dispose();
     _refreshSpin.dispose();
     super.dispose();
+  }
+
+  final _cards = <int, SwipeNotificationHandle>{};
+  bool _removingApp = false;
+
+  Future<void> deleteNotification(int id) async {
+    final card = _cards[id];
+    if (card?.attached == true) {
+      await card!.delete();
+    } else {
+      await widget.onDelete(id);
+    }
+  }
+
+  Future<void> removeApp(
+    String packageName,
+    Future<void> Function() commit,
+  ) async {
+    if (_removingApp) return;
+    final cards = [
+      for (final item in controller.items)
+        if (item.packageName == packageName &&
+            _cards[item.id]?.attached == true)
+          _cards[item.id]!,
+    ];
+    setState(() => _removingApp = true);
+    try {
+      await Future.wait([
+        for (var i = 0; i < cards.length; i++)
+          cards[i].animateOut(Duration(milliseconds: (i * 35).clamp(0, 140))),
+      ]);
+      await commit();
+    } catch (_) {
+      await Future.wait(cards.map((card) => card.restore()));
+      rethrow;
+    } finally {
+      if (mounted) setState(() => _removingApp = false);
+    }
+  }
+
+  final _dayKeys = <int, GlobalKey>{};
+  int _scrollRequest = 0;
+
+  void _scrollToTop() => _scrollTo(0);
+
+  void _scrollToDay(int id) {
+    final group = _dayKeys[id]?.currentContext?.findRenderObject();
+    if (group is RenderSliver) {
+      // Group constraints retain the content offset even while its header is pinned.
+      _scrollTo(group.constraints.precedingScrollExtent - 64);
+    }
+  }
+
+  Future<void> _scrollTo(double target) async {
+    if (!scroll.hasClients) return;
+    final request = ++_scrollRequest;
+    FocusManager.instance.primaryFocus?.unfocus();
+    openSwipe.value = null;
+    target = target.clamp(0.0, scroll.position.maxScrollExtent);
+    final viewport = scroll.position.viewportDimension;
+    if (scroll.offset - target > viewport * 1.5) {
+      scroll.jumpTo(
+        (target + viewport * .75).clamp(0.0, scroll.position.maxScrollExtent),
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !scroll.hasClients || request != _scrollRequest) return;
+    }
+    await scroll.animateTo(
+      target.clamp(0.0, scroll.position.maxScrollExtent),
+      duration: Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   int _highestId = 0;
@@ -198,7 +278,10 @@ class _HistoryFeedState extends State<HistoryFeed>
     final groups = <_NotificationDay>[];
     for (final item in controller.items) {
       if (groups.isEmpty || !sameDay(groups.last.date, item.savedAt)) {
-        groups.add(_NotificationDay(item.savedAt, [item]));
+        final date = item.savedAt;
+        groups.add(
+          _NotificationDay(DateTime(date.year, date.month, date.day), [item]),
+        );
       } else {
         groups.last.items.add(item);
       }
@@ -211,64 +294,67 @@ class _HistoryFeedState extends State<HistoryFeed>
     listenable: controller,
     builder: (context, _) {
       _observeItems();
-      return NotificationListener<ScrollNotification>(
-        onNotification: _handlePull,
-        child: Stack(
-          children: [
-            CustomScrollView(
-              key: const PageStorageKey('history'),
-              controller: scroll,
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: ClampingScrollPhysics(),
-              ),
-              slivers: [
-                const HistoryAppBar(),
-                SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  sliver: SliverToBoxAdapter(
-                    child: HistoryHeader(
-                      controller: controller,
-                      onAccess: onAccess,
-                    ),
-                  ),
+      final groups = _groupedItems();
+      final ids = controller.items.map((item) => item.id).toSet();
+      _cards.removeWhere((id, _) => !ids.contains(id));
+      final groupIds = groups.map((g) => g.date.millisecondsSinceEpoch).toSet();
+      _dayKeys.removeWhere((id, _) => !groupIds.contains(id));
+      return IgnorePointer(
+        ignoring: _removingApp,
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _handlePull,
+          child: Stack(
+            children: [
+              CustomScrollView(
+                key: PageStorageKey('history'),
+                controller: scroll,
+                physics: AlwaysScrollableScrollPhysics(
+                  parent: ClampingScrollPhysics(),
                 ),
-                SliverToBoxAdapter(child: _refreshIndicator()),
-                if (controller.items.isEmpty && !controller.loading)
-                  SliverFillRemaining(
-                    hasScrollBody: false,
-                    child: Center(
-                      child: HistoryEmpty(
-                        filtered: controller.filtered,
-                        status: controller.status,
+                slivers: [
+                  HistoryAppBar(
+                    onSettings: widget.onSettings,
+                    onScrollToTop: _scrollToTop,
+                  ),
+                  SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    sliver: SliverToBoxAdapter(
+                      child: HistoryHeader(
+                        controller: controller,
                         onAccess: onAccess,
-                        onReset: onResetFilters,
                       ),
                     ),
                   ),
-                for (final group in _groupedItems())
-                  SliverMainAxisGroup(
-                    key: ValueKey(
-                      'day-${group.date.year}-${group.date.month}-${group.date.day}',
-                    ),
-                    slivers: [
-                      SliverPersistentHeader(
-                        pinned: true,
-                        delegate: _DayHeaderDelegate(dayLabel(group.date)),
+                  SliverToBoxAdapter(child: _refreshIndicator()),
+                  if (controller.items.isEmpty && !controller.loading)
+                    SliverFillRemaining(
+                      hasScrollBody: false,
+                      child: Center(
+                        child: HistoryEmpty(
+                          filtered: controller.filtered,
+                          status: controller.status,
+                          onAccess: onAccess,
+                          onReset: onResetFilters,
+                        ),
                       ),
-                      SliverPadding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        sliver: DecoratedSliver(
-                          position: DecorationPosition.foreground,
-                          decoration: const BoxDecoration(
-                            borderRadius: BorderRadius.vertical(
-                              bottom: Radius.circular(20),
-                            ),
-                            border: Border(
-                              left: BorderSide(color: Color(0xFFEEECF4)),
-                              right: BorderSide(color: Color(0xFFEEECF4)),
-                              bottom: BorderSide(color: Color(0xFFEEECF4)),
-                            ),
+                    ),
+                  for (final group in groups)
+                    SliverMainAxisGroup(
+                      key: _dayKeys.putIfAbsent(
+                        group.date.millisecondsSinceEpoch,
+                        () => GlobalKey(),
+                      ),
+                      slivers: [
+                        SliverPersistentHeader(
+                          pinned: true,
+                          delegate: _DayHeaderDelegate(
+                            tr(context, dayLabel(group.date)),
+                            () =>
+                                _scrollToDay(group.date.millisecondsSinceEpoch),
                           ),
+                        ),
+                        SliverPadding(
+                          padding: EdgeInsets.symmetric(horizontal: 16),
                           sliver: SliverList.builder(
                             itemCount: group.items.length,
                             findChildIndexCallback: (key) {
@@ -280,80 +366,126 @@ class _HistoryFeedState extends State<HistoryFeed>
                             },
                             itemBuilder: (context, index) {
                               final item = group.items[index];
-                              final first = index == 0;
-                              final last = index == group.items.length - 1;
-                              final borderRadius = BorderRadius.only(
-                                topLeft: first
-                                    ? const Radius.circular(18)
-                                    : Radius.zero,
-                                topRight: first
-                                    ? const Radius.circular(18)
-                                    : Radius.zero,
-                                bottomLeft: last
-                                    ? const Radius.circular(20)
-                                    : Radius.zero,
-                                bottomRight: last
-                                    ? const Radius.circular(20)
-                                    : Radius.zero,
-                              );
                               return NotificationArrival(
                                 key: ValueKey('arrival-${item.id}'),
                                 animate: _pending.remove(item.id),
                                 child: SwipeNotificationCard(
                                   key: ValueKey('swipe-${item.id}'),
+                                  removal: _cards.putIfAbsent(
+                                    item.id,
+                                    () => SwipeNotificationHandle(),
+                                  ),
                                   item: item,
                                   repository: controller.repository,
                                   openItem: openSwipe,
-                                  borderRadius: borderRadius,
+                                  borderRadius: BorderRadius.only(
+                                    topLeft: index == 0
+                                        ? Radius.circular(20)
+                                        : Radius.zero,
+                                    topRight: index == 0
+                                        ? Radius.circular(20)
+                                        : Radius.zero,
+                                    bottomLeft: index == group.items.length - 1
+                                        ? Radius.circular(20)
+                                        : Radius.zero,
+                                    bottomRight: index == group.items.length - 1
+                                        ? Radius.circular(20)
+                                        : Radius.zero,
+                                  ),
                                   showTopBorder: false,
+                                  showBottomBorder:
+                                      index < group.items.length - 1,
                                   bottomSpacing: 0,
                                   onTap: () => onDetails(item),
                                   onDelete: () => onDelete(item.id),
+                                  onLongPress: widget.onLongPress == null
+                                      ? null
+                                      : (position) =>
+                                            widget.onLongPress!(item, position),
                                 ),
                               );
                             },
                           ),
                         ),
-                      ),
-                      const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                    ],
-                  ),
-                if (controller.items.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-                      child: Center(
-                        child: controller.loadingMore
-                            ? const CircularProgressIndicator(strokeWidth: 2)
-                            : controller.hasMore
-                            ? TextButton(
-                                onPressed: controller.loadMore,
-                                child: const Text('Показать ещё'),
-                              )
-                            : const SizedBox.shrink(),
+                        if (group != groups.last)
+                          SliverToBoxAdapter(child: SizedBox(height: 12)),
+                      ],
+                    ),
+                  if (controller.items.isNotEmpty &&
+                      (controller.hasMore || controller.loadingMore))
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(16, 12, 16, 24),
+                        child: Center(
+                          child: controller.loadingMore
+                              ? CircularProgressIndicator(strokeWidth: 2)
+                              : controller.hasMore
+                              ? TextButton(
+                                  onPressed: controller.loadMore,
+                                  child: Text(tr(context, 'Показать ещё')),
+                                )
+                              : SizedBox.shrink(),
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-            if (controller.items.isNotEmpty &&
-                controller.status.active &&
-                controller.error == null)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: CustomPaint(
-                    key: const ValueKey('notification-viewport-corners'),
-                    painter: _NotificationViewportPainter(
-                      color: Theme.of(context).scaffoldBackgroundColor,
-                      scroll: scroll,
-                      footerExtent: controller.hasMore || controller.loadingMore
-                          ? 84
-                          : 36,
+                ],
+              ),
+              if (controller.items.isNotEmpty)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 0,
+                  height: 20,
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      key: ValueKey('feed-bottom-rounding'),
+                      painter: ListCornersPainter(
+                        Theme.of(context).scaffoldBackgroundColor,
+                        bottom: true,
+                        scroll: scroll,
+                      ),
                     ),
                   ),
                 ),
+              Positioned(
+                right: 16 + 8, // List inset + the same inner gap as below.
+                bottom: 8,
+                child: AnimatedBuilder(
+                  animation: scroll,
+                  builder: (context, _) {
+                    final visible =
+                        scroll.hasClients &&
+                        scroll.offset > 160 &&
+                        scroll.position.extentAfter > 24;
+                    return IgnorePointer(
+                      ignoring: !visible,
+                      child: ExcludeSemantics(
+                        excluding: !visible,
+                        child: AnimatedSlide(
+                          offset: visible ? Offset.zero : Offset(0, .3),
+                          duration: Duration(milliseconds: 180),
+                          child: AnimatedOpacity(
+                            opacity: visible ? 1 : 0,
+                            duration: Duration(milliseconds: 180),
+                            child: FloatingActionButton.small(
+                              key: ValueKey('scroll-to-top'),
+                              heroTag: null,
+                              tooltip: tr(context, 'Наверх'),
+                              backgroundColor: ui(context).accentSurface,
+                              foregroundColor: ui(context).accent,
+                              elevation: 2,
+                              onPressed: _scrollToTop,
+                              child: Icon(Icons.arrow_upward_rounded),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
-          ],
+            ],
+          ),
         ),
       );
     },
@@ -404,16 +536,14 @@ class _NotificationDay {
 }
 
 class _DayHeaderDelegate extends SliverPersistentHeaderDelegate {
-  const _DayHeaderDelegate(this.label);
-
-  static const extent = 42.0;
+  const _DayHeaderDelegate(this.label, this.onTap);
+  final VoidCallback onTap;
   final String label;
 
   @override
-  double get minExtent => extent;
-
+  double get minExtent => 42;
   @override
-  double get maxExtent => extent;
+  double get maxExtent => 42;
 
   @override
   Widget build(
@@ -421,50 +551,43 @@ class _DayHeaderDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) => ColoredBox(
+    key: ValueKey('day-header-$label'),
     color: Theme.of(context).scaffoldBackgroundColor,
     child: Stack(
-      key: ValueKey('day-header-corners-$label'),
       clipBehavior: Clip.none,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: muted,
+        GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: onTap,
+          child: Semantics(
+            button: true,
+            label: tr(context, 'К началу дня: {0}', [label]),
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: ui(context).muted,
+                  ),
+                ),
               ),
             ),
           ),
         ),
         Positioned(
           left: 16,
-          bottom: -18,
-          child: _DayHeaderCorner(
-            color: Theme.of(context).scaffoldBackgroundColor,
-            left: true,
-          ),
-        ),
-        Positioned(
           right: 16,
-          bottom: -18,
-          child: _DayHeaderCorner(
-            color: Theme.of(context).scaffoldBackgroundColor,
-            left: false,
-          ),
-        ),
-        const Positioned(
-          left: 16,
-          right: 16,
-          bottom: -18,
-          height: 18,
+          bottom: -20,
+          height: 20,
           child: IgnorePointer(
             child: CustomPaint(
-              key: ValueKey('day-header-outline'),
-              painter: _DayHeaderOutlinePainter(),
+              painter: ListCornersPainter(
+                Theme.of(context).scaffoldBackgroundColor,
+              ),
             ),
           ),
         ),
@@ -474,157 +597,5 @@ class _DayHeaderDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _DayHeaderDelegate oldDelegate) =>
-      oldDelegate.label != label;
-}
-
-class _DayHeaderCorner extends StatelessWidget {
-  const _DayHeaderCorner({required this.color, required this.left});
-
-  final Color color;
-  final bool left;
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: 18,
-    child: CustomPaint(painter: _DayHeaderCornerPainter(color, left)),
-  );
-}
-
-class _DayHeaderCornerPainter extends CustomPainter {
-  const _DayHeaderCornerPainter(this.color, this.left);
-
-  final Color color;
-  final bool left;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path();
-    if (left) {
-      path
-        ..moveTo(0, 0)
-        ..lineTo(size.width, 0)
-        ..arcTo(
-          Rect.fromLTWH(0, 0, size.width * 2, size.height * 2),
-          -math.pi / 2,
-          -math.pi / 2,
-          false,
-        );
-    } else {
-      path
-        ..moveTo(size.width, 0)
-        ..lineTo(0, 0)
-        ..arcTo(
-          Rect.fromLTWH(-size.width, 0, size.width * 2, size.height * 2),
-          -math.pi / 2,
-          math.pi / 2,
-          false,
-        );
-    }
-    path.close();
-    canvas.drawPath(path, Paint()..color = color);
-  }
-
-  @override
-  bool shouldRepaint(covariant _DayHeaderCornerPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.left != left;
-}
-
-class _DayHeaderOutlinePainter extends CustomPainter {
-  const _DayHeaderOutlinePainter();
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    const radius = 18.0;
-    final path = Path()
-      ..moveTo(.5, radius)
-      ..arcTo(
-        Rect.fromLTWH(.5, .5, radius * 2, radius * 2),
-        math.pi,
-        math.pi / 2,
-        false,
-      )
-      ..lineTo(size.width - radius - .5, .5)
-      ..arcTo(
-        Rect.fromLTWH(size.width - radius * 2 - .5, .5, radius * 2, radius * 2),
-        -math.pi / 2,
-        math.pi / 2,
-        false,
-      );
-    canvas.drawPath(
-      path,
-      Paint()
-        ..color = const Color(0xFFEEECF4)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _DayHeaderOutlinePainter oldDelegate) => false;
-}
-
-class _NotificationViewportPainter extends CustomPainter {
-  _NotificationViewportPainter({
-    required this.color,
-    required this.scroll,
-    required this.footerExtent,
-  }) : super(repaint: scroll);
-
-  final ScrollController scroll;
-  final double footerExtent;
-
-  static const _inset = 16.0;
-  static const _radius = 20.0;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    // The list already draws its own bottom once it is visible. Only add a
-    // fixed edge when cards continue beyond the viewport.
-    if (!scroll.hasClients ||
-        scroll.position.extentAfter <= footerExtent + 12) {
-      return;
-    }
-    final paint = Paint()..color = color;
-    const left = _inset;
-    final right = size.width - _inset;
-    final bottom = size.height;
-    canvas.drawPath(
-      Path()
-        ..moveTo(left, bottom)
-        ..lineTo(left + _radius, bottom)
-        ..quadraticBezierTo(left, bottom, left, bottom - _radius)
-        ..close(),
-      paint,
-    );
-    canvas.drawPath(
-      Path()
-        ..moveTo(right, bottom)
-        ..lineTo(right - _radius, bottom)
-        ..quadraticBezierTo(right, bottom, right, bottom - _radius)
-        ..close(),
-      paint,
-    );
-    // Draw above the scrolling cards, along the fixed viewport edge.
-    canvas.drawPath(
-      Path()
-        ..moveTo(left + .5, bottom - _radius)
-        ..quadraticBezierTo(left + .5, bottom - .5, left + _radius, bottom - .5)
-        ..lineTo(right - _radius, bottom - .5)
-        ..quadraticBezierTo(
-          right - .5,
-          bottom - .5,
-          right - .5,
-          bottom - _radius,
-        ),
-      Paint()
-        ..color = const Color(0xFFEEECF4)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _NotificationViewportPainter oldDelegate) =>
-      oldDelegate.color != color || oldDelegate.footerExtent != footerExtent;
+      oldDelegate.label != label || oldDelegate.onTap != onTap;
 }

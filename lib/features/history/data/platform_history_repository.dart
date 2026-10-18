@@ -80,6 +80,16 @@ class PlatformHistoryRepository implements HistoryRepository {
   }
 
   @override
+  Future<SavedNotification?> notification(int id) async {
+    if (!_supported) return null;
+    final map = await _channel.invokeMapMethod<Object?, Object?>(
+      'notification',
+      {'id': id},
+    );
+    return map == null ? null : SavedNotification.fromMap(map);
+  }
+
+  @override
   Future<void> openAccess() async {
     if (_supported) await _channel.invokeMethod<void>('openAccess');
   }
