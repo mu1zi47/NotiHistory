@@ -38,6 +38,73 @@ String tr(
 }
 
 const english = <String, String>{
+  'Сбросить всё': 'Reset all',
+  'Приложения: {0}': 'Apps: {0}',
+  'Поиск: {0}': 'Search: {0}',
+  'Период: {0}': 'Period: {0}',
+  'Архив уведомлений': 'Archived notifications',
+  'Зачем указывать Telegram': 'Why provide a Telegram username?',
+  'Тема обращения': 'Topic',
+  'Написать разработчику': 'Contact the developer',
+  'Отправить обращение?': 'Send feedback?',
+  'Для отправки потребуется подключение к интернету. На сервер сайта NotiHistory и в Telegram разработчику будут отправлены заполненные поля формы: имя, Telegram, тема и сообщение, а также отметка об отправке из приложения. История уведомлений, архив и другие данные приложения не отправляются.': 'Sending requires an internet connection. The completed form fields — name, Telegram username, topic and message — plus a marker that this feedback was sent from the app will be sent to the NotiHistory website server and to the developer via Telegram. Your notification history, archive and other app data are not sent.',
+  'Отправить': 'Send',
+  'Отправляем…': 'Sending…',
+  'Сообщение отправлено': 'Message sent',
+  'Имя': 'Name',
+  'Как к вам обращаться': 'What should we call you?',
+  'Укажите имя': 'Enter your name',
+  '@username (необязательно)': '@username (optional)',
+  'Введите @username: от 5 до 32 букв, цифр или подчёркиваний':
+      'Enter @username: 5–32 letters, digits or underscores',
+  'Укажите username, чтобы разработчик мог с вами связаться. Без него ответить вам не получится.': 'Enter your username so the developer can contact you. Without it, you cannot receive a reply.',
+  'Сообщение': 'Message',
+  'Напишите, что случилось': 'Describe what happened',
+  'Напишите сообщение': 'Enter a message',
+  'Что-то не работает': 'Something is not working',
+  'Есть идея': 'I have an idea',
+  'Не получается установить': 'Installation problem',
+  'Вопрос о приложении': 'Question about the app',
+  'Другое': 'Other',
+  'Сервер не ответил вовремя. Текст сохранён в форме. Попробуйте позже.': 'The server did not respond in time. Your text is still in the form. Try again later.',
+  'Не удалось подключиться. Проверьте интернет и попробуйте снова.':
+      'Could not connect. Check your internet connection and try again.',
+  'Не удалось установить защищённое соединение. Попробуйте позже.':
+      'Could not establish a secure connection. Try again later.',
+  'Не удалось отправить сообщение. Попробуйте снова.':
+      'Could not send the message. Try again.',
+  'Проверьте заполненные поля формы.': 'Check the form fields.',
+  'Слишком много обращений. Попробуйте позже.':
+      'Too many requests. Try again later.',
+  'Отправка пока не настроена. Напишите разработчику на почту или в Telegram.': 'Sending is not configured yet. Contact the developer by email or Telegram.',
+
+  'Обратная связь': 'Feedback',
+  'Написать на почту': 'Send an email',
+  'Не найдено почтовое приложение.': 'No email app found.',
+  'Не удалось открыть страницу.': 'Could not open the page.',
+
+  'Уведомления приложения на этом экране':
+      'This app’s notifications on the current screen',
+  'Архив': 'Archive',
+  'Архивировать': 'Archive',
+  'Вернуть из архива': 'Unarchive',
+  'Архив пуст': 'Archive is empty',
+  'Смахните уведомление вправо, чтобы сохранить его в архиве.':
+      'Swipe a notification right to move it to the archive.',
+  'Показать на главном экране': 'Move back to the main screen',
+  'Сохранить отдельно от основной истории':
+      'Keep separate from the main history',
+  'Не удалось переместить уведомление. Попробуйте снова.':
+      'Could not move the notification. Try again.',
+  'Удалить уведомления приложения из архива?':
+      'Delete this app’s archived notifications?',
+  'Очистить архив?': 'Clear the archive?',
+  'Все уведомления от «{0}» в архиве будут удалены. Вернуть их не получится.': 'All archived notifications from “{0}” will be deleted. This cannot be undone.',
+  'Уведомления от «{0}» на главном экране будут удалены. Архив сохранится.': 'Notifications from “{0}” on the main screen will be deleted. Archived notifications will be kept.',
+  'Все уведомления в архиве будут удалены. Вернуть их не получится.':
+      'All archived notifications will be deleted. This cannot be undone.',
+  'Уведомления на главном экране будут удалены. Архив сохранится. Вернуть удалённые уведомления не получится.': 'Notifications on the main screen will be deleted. Archived notifications will be kept. Deletion cannot be undone.',
+
   'Закрыть': 'Close',
   'Настройки': 'Settings',
   'Уведомления': 'Notifications',
@@ -146,6 +213,8 @@ const english = <String, String>{
   '7 дней': '7 days',
   'Включённые': 'Enabled',
   'Выключенные': 'Disabled',
+  'Включить сохранение для всех?': 'Enable saving for all apps?',
+  'Уведомления всех приложений будут сохраняться в историю, включая ранее выключенные.': 'Notifications from all apps will be saved, including previously disabled apps.',
   'Настройки приложения': 'App settings',
   'Версия приложения: {0}': 'App version: {0}',
   'Язык': 'Language',

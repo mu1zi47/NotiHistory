@@ -1,6 +1,9 @@
 package uz.mu1zi47.notihistory
 
 import android.app.Activity
+import android.content.Intent
+import android.content.ActivityNotFoundException
+import android.net.Uri
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
@@ -24,6 +27,22 @@ class HistoryPlatformBridge(private val activity: Activity, messenger: BinaryMes
         })
         methods.setMethodCallHandler { call, result ->
             when (call.method) {
+                "openFeedback" -> {
+                    val destination = call.argument<String>("destination")
+                    val intent = when (destination) {
+                        "email" -> Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:valiyevmuiz0407@gmail.com"))
+                        "telegram" -> Intent(Intent.ACTION_VIEW, Uri.parse("https://mu1zi47.vercel.app/#contacts"))
+                        else -> null
+                    }
+                    if (intent == null) {
+                        result.error("invalid", "Unknown feedback destination", null)
+                    } else try {
+                        activity.startActivity(intent)
+                        result.success(null)
+                    } catch (_: ActivityNotFoundException) {
+                        result.error("unavailable", "No app available", null)
+                    }
+                }
                 "appVersion" -> {
                     @Suppress("DEPRECATION")
                     val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
@@ -38,6 +57,7 @@ class HistoryPlatformBridge(private val activity: Activity, messenger: BinaryMes
                     val theme = call.argument<String>("theme") ?: error("Missing theme")
                     require(language in listOf("ru", "en") && theme in listOf("system", "light", "dark"))
                     check(activity.getSharedPreferences("app_preferences", 0).edit().putString("language", language).putString("theme", theme).commit())
+                    activity.runOnUiThread { AppNightMode.apply(activity, theme) }
                     null
                 }
                 "captureApps" -> async(HistoryRuntime.worker, result) {
@@ -107,6 +127,7 @@ class HistoryPlatformBridge(private val activity: Activity, messenger: BinaryMes
                         call.argument<Number>("since")?.toLong() ?: 0L,
                         call.argument<Number>("beforeId")?.toLong(),
                         call.argument<Boolean>("includeOverview") ?: true,
+                        call.argument<Boolean>("archived") ?: false,
                     )
                 }
                 "clear" -> async(HistoryRuntime.worker, result) {
@@ -114,7 +135,14 @@ class HistoryPlatformBridge(private val activity: Activity, messenger: BinaryMes
                         call.argument<String>("search").orEmpty(),
                         call.argument<List<String>>("packageNames").orEmpty(),
                         call.argument<Number>("since")?.toLong() ?: 0L,
+                        call.argument<Boolean>("archived") ?: false,
                     ); HistoryRuntime.notifyChanged(); null
+                }
+                "setArchived" -> async(HistoryRuntime.worker, result) {
+                    val id = call.argument<Number>("id")?.toLong() ?: error("Missing id")
+                    val archived = call.argument<Boolean>("archived") ?: error("Missing archive state")
+                    HistoryRuntime.store(activity).setArchived(id, archived)
+                    HistoryRuntime.notifyChanged(); null
                 }
                 "delete" -> async(HistoryRuntime.worker, result) {
                     val id = call.argument<Number>("id")?.toLong()

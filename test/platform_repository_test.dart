@@ -88,6 +88,7 @@ void main() {
       'search': 'file',
       'packageNames': ['org.telegram', 'com.mail'],
       'since': 123,
+      'archived': false,
     });
   });
 

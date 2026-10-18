@@ -8,6 +8,7 @@ import '../../../../core/widgets/app_action_button.dart';
 class HistoryActions extends StatefulWidget {
   const HistoryActions({
     super.key,
+    this.searchReset = 0,
     required this.search,
     required this.onSearchChanged,
     required this.onFilter,
@@ -18,6 +19,7 @@ class HistoryActions extends StatefulWidget {
     required this.onPeriodChanged,
   });
 
+  final int searchReset;
   final TextEditingController search;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onFilter;
@@ -39,7 +41,7 @@ class _HistoryActionsState extends State<HistoryActions> {
   void _openSearch() {
     setState(() => _searching = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
+      if (mounted && _searching) _focus.requestFocus();
     });
   }
 
@@ -48,6 +50,15 @@ class _HistoryActionsState extends State<HistoryActions> {
     widget.search.clear();
     widget.onSearchChanged('');
     setState(() => _searching = false);
+  }
+
+  @override
+  void didUpdateWidget(HistoryActions oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchReset != widget.searchReset) {
+      _focus.unfocus();
+      _searching = false;
+    }
   }
 
   @override

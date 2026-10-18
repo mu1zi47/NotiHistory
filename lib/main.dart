@@ -4,6 +4,9 @@ import 'package:flutter/widgets.dart';
 
 import 'app.dart';
 import 'core/theme/system_bars.dart';
+import 'core/settings/app_preferences.dart';
+
+import 'package:flutter/material.dart' show ThemeMode;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -14,12 +17,16 @@ Future<void> main() async {
       ], await rootBundle.loadString('assets/fonts/OFL-$font.txt'));
     }
   });
+  final preferences = AppPreferences();
+  await preferences.load();
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   SystemChrome.setSystemUIOverlayStyle(
-    WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-            Brightness.dark
+    (preferences.themeMode == ThemeMode.dark ||
+            (preferences.themeMode == ThemeMode.system &&
+                WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+                    Brightness.dark))
         ? transparentDarkSystemBars
         : transparentSystemBars,
   );
-  runApp(const NotiHistoryApp());
+  runApp(NotiHistoryApp(preferences: preferences, preferencesLoaded: true));
 }

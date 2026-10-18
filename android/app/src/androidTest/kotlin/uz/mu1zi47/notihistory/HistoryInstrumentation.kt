@@ -54,6 +54,22 @@ class HistoryInstrumentation : Instrumentation() {
             targetContext.deleteDatabase(databaseName)
             HistoryStore(targetContext, databaseName).use { store ->
                 fun save(key: String = "key", body: String = "Привет Мир") = store.save(key, "test.app", "Телеграм", "Заголовок", body, "", 1000)
+                check(save(key = "archive", body = "Keep this"))
+                val archiveId = store.lastId("archive")!!
+                store.setArchived(archiveId, true)
+                check((store.query("", emptyList(), 0, null)["stats"] as Map<*, *>)["archived"] == 1)
+                check(store.query("", emptyList(), 0, null)["matched"] == 0)
+                check(store.query("Keep", emptyList(), 0, null, archived = true)["matched"] == 1)
+                check(save(key = "visible", body = "Delete this"))
+                store.clear("", listOf("test.app"))
+                check(store.query("", emptyList(), 0, null)["matched"] == 0)
+                check(store.notification(archiveId)?.get("body") == "Keep this")
+                check(store.query("", emptyList(), 0, null, archived = true)["matched"] == 1)
+                store.setArchived(archiveId, false)
+                check(store.query("", emptyList(), 0, null)["matched"] == 1)
+                check(store.query("", emptyList(), 0, null, archived = true)["matched"] == 0)
+                store.clear()
+                results.putString("archive", "PASS: archive isolated from search, overview and clearing, restore preserves content")
                 check(save())
                 check(!save()) { "Duplicate notification was written twice" }
                 check(save(body = "Обновлённое сообщение"))
@@ -130,6 +146,13 @@ class HistoryInstrumentation : Instrumentation() {
                 check(upgraded.query("body", emptyList(), 0, null)["matched"] == 1)
                 val indexes = upgraded.readableDatabase.rawQuery("SELECT name FROM sqlite_master WHERE type = 'index'", null).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
                 check("history_saved_at" in indexes && "history_package_date" in indexes)
+                upgraded.setArchived(1, true)
+                upgraded.clear()
+                check(upgraded.query("", emptyList(), 0, null, archived = true)["matched"] == 1)
+            }
+            HistoryStore(targetContext, databaseName).use { reopened ->
+                check(reopened.query("", emptyList(), 0, null, archived = true)["matched"] == 1)
+                reopened.clear(archived = true)
             }
             results.putString("migration", "PASS: v1 history retained, v2 indexes present, persistence after reopen")
             val notification = Notification.Builder(targetContext, "test").setContentTitle("Title").setContentText("plain text").build()

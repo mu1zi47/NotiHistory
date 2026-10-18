@@ -28,6 +28,8 @@ class HistoryFeed extends StatefulWidget {
     required this.onResetFilters,
     required this.onDetails,
     this.onSettings,
+    this.onArchive,
+    this.onOpenArchive,
     this.onLongPress,
   });
   final HistoryController controller;
@@ -35,6 +37,8 @@ class HistoryFeed extends StatefulWidget {
   final ValueNotifier<int?> openSwipe;
   final VoidCallback onAccess, onResetFilters;
   final VoidCallback? onSettings;
+  final VoidCallback? onOpenArchive;
+  final Future<bool> Function(int id)? onArchive;
   final void Function(SavedNotification item, Offset position)? onLongPress;
   final Future<bool> Function(int id) onDelete;
   final ValueChanged<SavedNotification> onDetails;
@@ -180,6 +184,15 @@ class HistoryFeedState extends State<HistoryFeed>
   final _cards = <int, SwipeNotificationHandle>{};
   bool _removingApp = false;
 
+  Future<void> archiveNotification(int id) async {
+    final card = _cards[id];
+    if (card?.attached == true) {
+      await card!.archive();
+    } else {
+      await widget.onArchive?.call(id);
+    }
+  }
+
   Future<void> deleteNotification(int id) async {
     final card = _cards[id];
     if (card?.attached == true) {
@@ -314,6 +327,7 @@ class HistoryFeedState extends State<HistoryFeed>
                 slivers: [
                   HistoryAppBar(
                     onSettings: widget.onSettings,
+                    archived: controller.archived,
                     onScrollToTop: _scrollToTop,
                   ),
                   SliverPadding(
@@ -321,6 +335,8 @@ class HistoryFeedState extends State<HistoryFeed>
                     sliver: SliverToBoxAdapter(
                       child: HistoryHeader(
                         controller: controller,
+                        onResetFilters: onResetFilters,
+                        onOpenArchive: widget.onOpenArchive,
                         onAccess: onAccess,
                       ),
                     ),
@@ -332,6 +348,7 @@ class HistoryFeedState extends State<HistoryFeed>
                       child: Center(
                         child: HistoryEmpty(
                           filtered: controller.filtered,
+                          archived: controller.archived,
                           status: controller.status,
                           onAccess: onAccess,
                           onReset: onResetFilters,
@@ -398,6 +415,10 @@ class HistoryFeedState extends State<HistoryFeed>
                                   bottomSpacing: 0,
                                   onTap: () => onDetails(item),
                                   onDelete: () => onDelete(item.id),
+                                  archived: controller.archived,
+                                  onArchive: widget.onArchive == null
+                                      ? null
+                                      : () => widget.onArchive!(item.id),
                                   onLongPress: widget.onLongPress == null
                                       ? null
                                       : (position) =>

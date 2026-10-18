@@ -1,3 +1,4 @@
+import 'package:noti_history/core/widgets/option_icon.dart';
 import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,6 +17,7 @@ Future<Set<String>?> showAppFilterSheet(
   required List<SavedApp> apps,
   required Set<String> selected,
   required HistoryRepository repository,
+  bool archived = false,
   Future<List<SavedApp>> Function(SavedApp app)? deleteApp,
 }) async {
   var currentApps = apps;
@@ -39,6 +41,7 @@ Future<Set<String>?> showAppFilterSheet(
     final confirmed = await confirmClearHistory(
       context,
       appName: result.app.name,
+      archived: archived,
       waitForDismiss: true,
     );
     if (!context.mounted) return null;
@@ -47,8 +50,11 @@ Future<Set<String>?> showAppFilterSheet(
         if (deleteApp != null) {
           currentApps = await deleteApp(result.app);
         } else {
-          await repository.clear(packageNames: {result.app.packageName});
-          currentApps = (await repository.query()).apps;
+          await repository.clear(
+            packageNames: {result.app.packageName},
+            archived: archived,
+          );
+          currentApps = (await repository.query(archived: archived)).apps;
         }
         final available = currentApps.map((app) => app.packageName).toSet();
         draft.removeWhere((name) => !available.contains(name));
@@ -158,12 +164,9 @@ class _AppFilterSheetState extends State<_AppFilterSheet> {
                   'Показывать уведомления от всех приложений',
                 ),
                 selected: _selected.isEmpty,
-                leading: Icon(
-                  Icons.apps_rounded,
-                  color: _selected.isEmpty
-                      ? ui(context).accent
-                      : ui(context).ink,
-                  size: 22,
+                leading: OptionIcon(
+                  icon: Icons.apps_rounded,
+                  selected: _selected.isEmpty,
                 ),
                 onTap: () => setState(_selected.clear),
               ),

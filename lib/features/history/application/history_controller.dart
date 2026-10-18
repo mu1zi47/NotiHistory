@@ -10,9 +10,13 @@ import '../domain/saved_notification.dart';
 
 /// Owns queries and lifecycle; no BuildContext, navigation or platform channels.
 class HistoryController extends ChangeNotifier {
-  HistoryController(this.repository, {DateTime Function()? now})
-    : _now = now ?? DateTime.now;
+  HistoryController(
+    this.repository, {
+    DateTime Function()? now,
+    this.archived = false,
+  }) : _now = now ?? DateTime.now;
   final HistoryRepository repository;
+  final bool archived;
   final DateTime Function() _now;
   StreamSubscription<void>? _subscription;
   Timer? _searchTimer, _changeTimer;
@@ -23,7 +27,7 @@ class HistoryController extends ChangeNotifier {
   String _search = '';
   String? _error;
   Set<String> _packageNames = const {};
-  int _period = 0, _since = 0, _matched = 0, _total = 0;
+  int _period = 0, _since = 0, _matched = 0, _total = 0, _archivedCount = 0;
   CaptureStatus _status = const CaptureStatus();
   List<SavedNotification> _items = const [];
   List<SavedApp> _apps = const [];
@@ -37,6 +41,7 @@ class HistoryController extends ChangeNotifier {
   int get period => _period;
   int get matched => _matched;
   int get total => _total;
+  int get archivedCount => _archivedCount;
   bool get loading => _busy;
   bool get loadingMore => _loadingMore;
   bool get clearing => _clearing;
@@ -157,6 +162,7 @@ class HistoryController extends ChangeNotifier {
       final results = await Future.wait<Object>([
         if (refreshStatus) repository.status(),
         repository.query(
+          archived: archived,
           search: _search,
           packageNames: _packageNames,
           since: _since,
@@ -169,6 +175,7 @@ class HistoryController extends ChangeNotifier {
       if (refreshOverview) {
         _apps = List.unmodifiable(page.apps);
         _total = page.total;
+        _archivedCount = page.archivedCount;
         _hasOverview = true;
         final available = _apps.map((app) => app.packageName).toSet();
         final selected = _packageNames.intersection(available);
@@ -218,6 +225,7 @@ class HistoryController extends ChangeNotifier {
     _emit();
     try {
       final page = await repository.query(
+        archived: archived,
         search: _search,
         packageNames: _packageNames,
         since: _since,
@@ -255,6 +263,7 @@ class HistoryController extends ChangeNotifier {
     _emit();
     try {
       await repository.clear(
+        archived: archived,
         search: packageName == null ? _search : '',
         packageNames: packageName == null ? _packageNames : {packageName},
         since: packageName == null ? _since : 0,
@@ -272,7 +281,16 @@ class HistoryController extends ChangeNotifier {
     }
   }
 
-  Future<void> delete(int id) async {
+  Future<void> archive(int id) =>
+      _remove(id, () => repository.setArchived(id, !archived), moving: true);
+
+  Future<void> delete(int id) => _remove(id, () => repository.delete(id));
+
+  Future<void> _remove(
+    int id,
+    Future<void> Function() commit, {
+    bool moving = false,
+  }) async {
     if (_disposed) return;
     final index = _items.indexWhere((item) => item.id == id);
     if (index < 0) return;
@@ -281,9 +299,12 @@ class HistoryController extends ChangeNotifier {
     ++_generation;
     _busy = false;
     _loadingMore = false;
-    await repository.delete(id);
+    await commit();
     if (_disposed) return;
     _items = List.unmodifiable(_items.where((item) => item.id != id));
+    if (moving) {
+      _archivedCount = (_archivedCount + (archived ? -1 : 1)).clamp(0, 1 << 31);
+    }
     if (_matched > 0) _matched--;
     if (_total > 0) _total--;
     _apps = List.unmodifiable([

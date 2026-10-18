@@ -9,7 +9,7 @@ import java.util.Calendar
 import java.util.Locale
 
 /** Writes are serialized; a separate reader uses WAL. No Flutter engine is needed. */
-class HistoryStore(context: Context, databaseName: String = "notification_history.db") : SQLiteOpenHelper(context, databaseName, null, 5) {
+class HistoryStore(context: Context, databaseName: String = "notification_history.db") : SQLiteOpenHelper(context, databaseName, null, 6) {
     init { setWriteAheadLoggingEnabled(true) }
 
     override fun onCreate(db: SQLiteDatabase) {
@@ -18,15 +18,20 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
             package_name TEXT NOT NULL, app_name TEXT NOT NULL,
             title TEXT NOT NULL, body TEXT NOT NULL, sub_text TEXT NOT NULL,
             posted_at INTEGER NOT NULL, saved_at INTEGER NOT NULL,
-            search_text TEXT NOT NULL, image BLOB
+            search_text TEXT NOT NULL, image BLOB, archived INTEGER NOT NULL DEFAULT 0
         )""")
         db.execSQL("CREATE INDEX history_package ON history(package_name, id)")
         db.execSQL("CREATE TABLE last_seen (notification_key TEXT PRIMARY KEY, digest TEXT NOT NULL, history_id INTEGER, coalescing INTEGER NOT NULL DEFAULT 0)")
         addIndexes(db)
         addMessageTable(db)
+        addArchiveIndexes(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 6) {
+            db.execSQL("ALTER TABLE history ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            addArchiveIndexes(db)
+        }
         if (oldVersion < 5) addMessageTable(db)
         if (oldVersion < 4) db.execSQL("ALTER TABLE history ADD COLUMN image BLOB")
         if (oldVersion < 2) addIndexes(db)
@@ -34,6 +39,15 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
             db.execSQL("ALTER TABLE last_seen ADD COLUMN history_id INTEGER")
             db.execSQL("ALTER TABLE last_seen ADD COLUMN coalescing INTEGER NOT NULL DEFAULT 0")
         }
+    }
+
+    private fun addArchiveIndexes(db: SQLiteDatabase) {
+        db.execSQL("CREATE INDEX IF NOT EXISTS history_archive_id ON history(archived, id)")
+        db.execSQL("CREATE INDEX IF NOT EXISTS history_archive_package ON history(archived, package_name)")
+    }
+
+    fun setArchived(id: Long, archived: Boolean) {
+        writableDatabase.update("history", ContentValues().apply { put("archived", if (archived) 1 else 0) }, "id = ?", arrayOf(id.toString()))
     }
 
     private fun addIndexes(db: SQLiteDatabase) {
@@ -142,7 +156,14 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
         if (!c.moveToFirst()) null else mapOf(
             "id" to c.getLong(0), "packageName" to c.getString(1), "appName" to c.getString(2),
             "title" to c.getString(3), "body" to c.getString(4), "subText" to c.getString(5),
-            "postedAt" to c.getLong(6), "savedAt" to c.getLong(7), "hasImage" to (c.getInt(8) != 0)
+            "postedAt" to c.getLong(6), "savedAt" to c.getLong(7), "hasImage" to (c.getInt(8) != 0),
+            "messages" to readableDatabase.rawQuery("SELECT sender, body FROM history_messages WHERE history_id = ? ORDER BY position", arrayOf(id.toString())).use { messages ->
+                buildList { while (messages.moveToNext()) {
+                    val sender = messages.getString(0)
+                    val text = messages.getString(1)
+                    add(if (sender.isBlank()) text else "$sender: $text")
+                } }
+            }
         )
     }
 
@@ -189,9 +210,9 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
         obsolete.forEach { forget(it) }
     }
 
-    fun clear(search: String = "", packageNames: List<String> = emptyList(), since: Long = 0) {
+    fun clear(search: String = "", packageNames: List<String> = emptyList(), since: Long = 0, archived: Boolean = false) {
         // Keep last_seen so active notifications do not reappear after a reconnect.
-        val (conditions, args) = filters(search, packageNames, since)
+        val (conditions, args) = filters(search, packageNames, since, archived)
         writableDatabase.delete("history", conditions.takeIf { it.isNotEmpty() }?.joinToString(" AND "), args.toTypedArray())
     }
 
@@ -199,8 +220,8 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
         writableDatabase.delete("history", "id = ?", arrayOf(id.toString()))
     }
 
-    private fun filters(search: String, packageNames: List<String>, since: Long): Pair<MutableList<String>, MutableList<String>> {
-        val conditions = mutableListOf<String>()
+    private fun filters(search: String, packageNames: List<String>, since: Long, archived: Boolean): Pair<MutableList<String>, MutableList<String>> {
+        val conditions = mutableListOf("archived = ${if (archived) 1 else 0}")
         val args = mutableListOf<String>()
         if (since > 0) { conditions.add("saved_at >= ?"); args.add(since.toString()) }
         if (search.isNotBlank()) {
@@ -214,8 +235,8 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
         return conditions to args
     }
 
-    fun query(search: String, packageNames: List<String>, since: Long, beforeId: Long?, includeOverview: Boolean = true): Map<String, Any> {
-        val (conditions, args) = filters(search, packageNames, since)
+    fun query(search: String, packageNames: List<String>, since: Long, beforeId: Long?, includeOverview: Boolean = true, archived: Boolean = false): Map<String, Any> {
+        val (conditions, args) = filters(search, packageNames, since, archived)
         val db = readableDatabase
         fun where() = if (conditions.isEmpty()) "" else "WHERE ${conditions.joinToString(" AND ")}"
         // A cursor page does not need to recount all matches or rebuild the app list.
@@ -236,9 +257,10 @@ class HistoryStore(context: Context, databaseName: String = "notification_histor
         val midnight = Calendar.getInstance().apply {
             set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
         }.timeInMillis
-        val stats = db.rawQuery("SELECT (SELECT COUNT(*) FROM history), (SELECT COUNT(*) FROM history WHERE saved_at >= ?)", arrayOf(midnight.toString()))
-            .use { it.moveToFirst(); mapOf("total" to it.getInt(0), "today" to it.getInt(1)) }
-        val apps = db.rawQuery("SELECT package_name, MAX(app_name), COUNT(*) FROM history GROUP BY package_name ORDER BY COUNT(*) DESC", null).use { c ->
+        val scope = if (archived) 1 else 0
+        val stats = db.rawQuery("SELECT (SELECT COUNT(*) FROM history WHERE archived = $scope), (SELECT COUNT(*) FROM history WHERE archived = $scope AND saved_at >= ?), (SELECT COUNT(*) FROM history WHERE archived = 1)", arrayOf(midnight.toString()))
+            .use { it.moveToFirst(); mapOf("total" to it.getInt(0), "today" to it.getInt(1), "archived" to it.getInt(2)) }
+        val apps = db.rawQuery("SELECT package_name, MAX(app_name), COUNT(*) FROM history WHERE archived = $scope GROUP BY package_name ORDER BY COUNT(*) DESC", null).use { c ->
             buildList { while (c.moveToNext()) add(mapOf("packageName" to c.getString(0), "appName" to c.getString(1), "count" to c.getInt(2))) }
         }
         result["stats"] = stats

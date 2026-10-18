@@ -46,6 +46,7 @@ class PlatformHistoryRepository implements HistoryRepository {
     int since = 0,
     int? beforeId,
     bool includeOverview = true,
+    bool archived = false,
   }) async {
     if (!_supported) return const HistoryPage();
     final map = (await _channel.invokeMapMethod<String, dynamic>('query', {
@@ -54,6 +55,7 @@ class PlatformHistoryRepository implements HistoryRepository {
       'since': since,
       'beforeId': beforeId,
       'includeOverview': includeOverview,
+      'archived': archived,
     }))!;
     final stats = map['stats'] as Map?;
     return HistoryPage(
@@ -73,6 +75,7 @@ class PlatformHistoryRepository implements HistoryRepository {
           )
           .toList(growable: false),
       total: stats?['total'] as int? ?? 0,
+      archivedCount: stats?['archived'] as int? ?? 0,
       today: stats?['today'] as int? ?? 0,
       matched: map['matched'] as int? ?? 0,
       hasMore: map['hasMore'] == true,
@@ -123,12 +126,24 @@ class PlatformHistoryRepository implements HistoryRepository {
     String search = '',
     Set<String> packageNames = const <String>{},
     int since = 0,
+    bool archived = false,
   }) async {
     if (_supported) {
       await _channel.invokeMethod<void>('clear', {
         'search': search,
         'packageNames': packageNames.toList(growable: false),
         'since': since,
+        'archived': archived,
+      });
+    }
+  }
+
+  @override
+  Future<void> setArchived(int id, bool archived) async {
+    if (_supported) {
+      await _channel.invokeMethod<void>('setArchived', {
+        'id': id,
+        'archived': archived,
       });
     }
   }

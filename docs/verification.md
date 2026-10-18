@@ -215,3 +215,22 @@
 - Language/theme pickers now match the shared app/filter style: centered Exo2 heading, rounded surface block, divider lines, purple icon tiles and selected checkmark. Pickers use the shared content-size/pull-to-dismiss behavior.
 - Fixed HistoryAppBar's explicit light-mode system overlay style, which overrode the otherwise dynamic root/theme style. It now requests light status/navigation icons in dark mode. Startup honors device brightness, and native night styles/launch background use dark surfaces with light icons.
 - All 60 Flutter tests passed after the layout change. Preference tests verify direct access on Settings and assert light status/navigation icon brightness on the actual main SliverAppBar after switching to dark mode. Updated theme/language picker previews were rendered and visually inspected. Analysis and whitespace checks passed.
+
+
+## Notification archive (2026-10-18)
+
+Added database v6 archive flag and scope indexes, preserving existing history and notification message/image data. Main queries, app counts and clear operations exclude archived rows; archive queries and clear operations affect only archived rows. Capture updates preserve the archive flag. Right swipe archives (or restores in archive), left swipe deletes; long-press uses the same slide/collapse animation. Archive is accessible from the main toolbar and supports existing search, period and app filters. App-wide menu deletion still requires confirmation, now describing the current scope.
+
+Android instrumentation on SM-A336B passed archive isolation, restore, v1-to-v6 migration and archive persistence after reopening, plus all existing storage/parser/message/image checks. Tests use an isolated database. Flutter regression covers archive via menu, clearing main history without losing archive, restoring by swipe and navigating back. Production updates use adb install -r; no main-package uninstall or user-data clearing.
+
+
+## Page back swipes and archive entry (2026-10-18)
+
+Settings, capture apps and archive use interactive full-page rightward back swipes with cancellation and PopScope protection. Main notifications keep rightward archive and leftward delete. In archive rows, rightward drags yield to page navigation; restore remains in the long-press menu, and leftward deletion still works. Horizontal editing/switch controls retain their own gestures.
+
+Archive entry moved from the toolbar to a full-width outlined row above the feed. Overview returns an indexed global archive count, independent of search, period and main notification count; this keeps the button visible after clearing main history, and hides it when archive is empty. Regression tests cover these states, held/cancelled back swipes starting at screen center, and archive notification gestures.
+
+
+### Navigation correction
+
+Normal push, back-button and system-back transitions again delegate to MaterialPageRoute. Only an active full-page back drag uses the interactive slide, with the screen subtree retained by a GlobalKey. Archive notifications own both horizontal gestures again: left deletes, right restores. Page-back swipe applies on free space; horizontal row controls take precedence. Archive entry now uses FilledButton and the shared purple button theme rather than an outlined style. Regression compares the normal opening geometry against MaterialPageRoute and verifies archive-row actions and free-space navigation.

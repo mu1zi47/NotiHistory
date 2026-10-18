@@ -11,8 +11,14 @@ import 'features/history/domain/history_repository.dart';
 import 'features/history/presentation/history_screen.dart';
 
 class NotiHistoryApp extends StatefulWidget {
-  const NotiHistoryApp({super.key, this.repository, this.preferences});
+  const NotiHistoryApp({
+    super.key,
+    this.repository,
+    this.preferences,
+    this.preferencesLoaded = false,
+  });
   final AppPreferences? preferences;
+  final bool preferencesLoaded;
   final HistoryRepository? repository;
   @override
   State<NotiHistoryApp> createState() => _NotiHistoryAppState();
@@ -27,6 +33,10 @@ class _NotiHistoryAppState extends State<NotiHistoryApp> {
   @override
   void initState() {
     super.initState();
+    if (widget.preferencesLoaded) {
+      _ready = true;
+      return;
+    }
     _preferences.load().whenComplete(() {
       if (mounted) setState(() => _ready = true);
     });

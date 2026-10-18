@@ -9,11 +9,15 @@ class SavedNotification {
     required this.postedAt,
     required this.savedAt,
     this.hasImage = false,
+    this.messages = const [],
   });
   factory SavedNotification.fromMap(Map<Object?, Object?> map) =>
       SavedNotification(
         id: map['id'] as int,
         hasImage: map['hasImage'] == true,
+        messages: List<String>.unmodifiable(
+          (map['messages'] as List?)?.cast<String>() ?? const <String>[],
+        ),
         packageName: map['packageName'] as String,
         appName: map['appName'] as String,
         title: map['title'] as String,
@@ -22,6 +26,7 @@ class SavedNotification {
         postedAt: DateTime.fromMillisecondsSinceEpoch(map['postedAt'] as int),
         savedAt: DateTime.fromMillisecondsSinceEpoch(map['savedAt'] as int),
       );
+  final List<String> messages;
   final int id;
   final bool hasImage;
   final String packageName, appName, title, body, subText;

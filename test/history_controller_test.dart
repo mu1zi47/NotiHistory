@@ -30,6 +30,7 @@ class ControlledRepository extends MemoryRepository {
     int since = 0,
     int? beforeId,
     bool includeOverview = true,
+    bool archived = false,
   }) {
     final request = (
       search: search,

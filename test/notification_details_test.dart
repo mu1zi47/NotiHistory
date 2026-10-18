@@ -12,6 +12,46 @@ import 'package:noti_history/features/history/presentation/widgets/notification_
 import 'support/memory_repository.dart';
 
 void main() {
+  testWidgets(
+    'Only real message boundaries get dividers, internal lines stay intact',
+    (tester) async {
+      final item = SavedNotification(
+        id: 77,
+        packageName: 'telegram',
+        appName: 'Telegram',
+        title: 'Chat',
+        body: 'User: hello\nName: example\nUser: second\n\nline',
+        subText: '',
+        postedAt: DateTime(2026),
+        savedAt: DateTime(2026),
+        messages: const ['User: hello\nName: example', 'User: second\n\nline'],
+      );
+      final repository = MemoryRepository()..entries.clear();
+      repository.entries.add(item);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildAppTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () =>
+                    showNotificationDetails(context, item, repository),
+                child: const Text('Open'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Open'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('message-divider-1')), findsOneWidget);
+      expect(find.byKey(const ValueKey('message-divider-2')), findsNothing);
+      expect(find.text('User: hello\nName: example'), findsOneWidget);
+      expect(find.text('User: second\n\nline'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Feed labels an image without a clickable preview', (
     tester,
   ) async {
@@ -71,7 +111,7 @@ void main() {
         packageName: 'test.app',
         appName: 'Тест',
         title: 'Заголовок',
-        body: 'Полный текст\nВторая строка',
+        body: 'Автор: Привет\nВторая строка\n\nИмя: Тест\nTelegram: @test_user\nТема: Вопрос',
         subText: 'Дополнительный текст',
         postedAt: DateTime(2026, 10, 4, 12, 30),
         savedAt: DateTime(2026, 10, 4),
@@ -96,7 +136,7 @@ void main() {
       for (final text in [
         'Тест',
         'Заголовок',
-        'Полный текст\nВторая строка',
+        'Автор: Привет\nВторая строка\n\nИмя: Тест\nTelegram: @test_user\nТема: Вопрос',
         'test.app',
         '04.10.2026 · 12:30',
       ]) {
@@ -108,7 +148,10 @@ void main() {
       final button = find.widgetWithText(FilledButton, 'Скопировать текст');
       await tester.tap(button);
       await tester.pumpAndSettle();
-      expect(clipboard, 'Заголовок\nПолный текст\nВторая строка');
+      expect(
+        clipboard,
+        'Заголовок\nАвтор: Привет\nВторая строка\n\nИмя: Тест\nTelegram: @test_user\nТема: Вопрос',
+      );
       expect(find.text('Скопировано'), findsOneWidget);
       expect(find.byType(SnackBar), findsNothing);
       await tester.pump(const Duration(seconds: 1));
@@ -180,6 +223,7 @@ void main() {
         postedAt: original.postedAt,
         savedAt: original.savedAt,
       );
+      repository.entries[0] = item;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(

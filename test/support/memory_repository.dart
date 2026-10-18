@@ -7,6 +7,16 @@ import 'package:noti_history/features/history/domain/saved_app.dart';
 import 'package:noti_history/features/history/domain/saved_notification.dart';
 
 class MemoryRepository implements HistoryRepository {
+  final archivedIds = <int>{};
+  @override
+  Future<void> setArchived(int id, bool archived) async {
+    if (archived) {
+      archivedIds.add(id);
+    } else {
+      archivedIds.remove(id);
+    }
+  }
+
   bool granted = true;
   int? openedNotification;
   bool notificationAvailable = true;
@@ -70,10 +80,12 @@ class MemoryRepository implements HistoryRepository {
     String search = '',
     Set<String> packageNames = const <String>{},
     int since = 0,
+    bool archived = false,
   }) async {
     clearCalls++;
     entries.removeWhere(
       (e) =>
+          archivedIds.contains(e.id) == archived &&
           (packageNames.isEmpty || packageNames.contains(e.packageName)) &&
           e.savedAt.millisecondsSinceEpoch >= since &&
           '${e.appName}\n${e.packageName}\n${e.title}\n${e.body}\n${e.subText}'
@@ -94,6 +106,7 @@ class MemoryRepository implements HistoryRepository {
     int since = 0,
     int? beforeId,
     bool includeOverview = true,
+    bool archived = false,
   }) async {
     lastSearch = search;
     lastSince = since;
@@ -101,6 +114,7 @@ class MemoryRepository implements HistoryRepository {
     final matches = entries
         .where(
           (e) =>
+              archivedIds.contains(e.id) == archived &&
               (packageNames.isEmpty || packageNames.contains(e.packageName)) &&
               e.savedAt.millisecondsSinceEpoch >= since &&
               '${e.appName} ${e.packageName} ${e.title} ${e.body} ${e.subText}'
@@ -109,9 +123,15 @@ class MemoryRepository implements HistoryRepository {
         )
         .toList();
     return HistoryPage(
+      archivedCount: entries.where((e) => archivedIds.contains(e.id)).length,
       items: matches,
-      apps: entries.map((e) => SavedApp(e.packageName, e.appName, 1)).toList(),
-      total: entries.length,
+      apps: entries
+          .where((e) => archivedIds.contains(e.id) == archived)
+          .map((e) => SavedApp(e.packageName, e.appName, 1))
+          .toList(),
+      total: entries
+          .where((e) => archivedIds.contains(e.id) == archived)
+          .length,
       today: entries.length,
       matched: matches.length,
     );

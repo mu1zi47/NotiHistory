@@ -1,3 +1,4 @@
+import 'package:noti_history/core/navigation/app_page_route.dart';
 import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,8 +18,13 @@ import 'notification_actions_menu.dart';
 import '../../settings/settings_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
-  const HistoryScreen({super.key, required this.repository});
+  const HistoryScreen({
+    super.key,
+    required this.repository,
+    this.archived = false,
+  });
   final HistoryRepository repository;
+  final bool archived;
   @override
   State<HistoryScreen> createState() => _HistoryScreenState();
 }
@@ -27,6 +33,7 @@ class _HistoryScreenState extends State<HistoryScreen>
     with WidgetsBindingObserver {
   late final HistoryController _controller;
   final _search = TextEditingController();
+  int _searchReset = 0;
   final _scroll = ScrollController();
   final _feedKey = GlobalKey<HistoryFeedState>();
   bool _actionInProgress = false;
@@ -34,7 +41,10 @@ class _HistoryScreenState extends State<HistoryScreen>
   @override
   void initState() {
     super.initState();
-    _controller = HistoryController(widget.repository)..start();
+    _controller = HistoryController(
+      widget.repository,
+      archived: widget.archived,
+    )..start();
     WidgetsBinding.instance.addObserver(this);
     _scroll.addListener(_onScroll);
   }
@@ -63,7 +73,11 @@ class _HistoryScreenState extends State<HistoryScreen>
 
   Future<void> _clear() async {
     FocusManager.instance.primaryFocus?.unfocus();
-    if (!await confirmClearHistory(context, filtered: _controller.filtered) ||
+    if (!await confirmClearHistory(
+          context,
+          filtered: _controller.filtered,
+          archived: widget.archived,
+        ) ||
         !mounted) {
       return;
     }
@@ -87,6 +101,7 @@ class _HistoryScreenState extends State<HistoryScreen>
       apps: _controller.apps,
       selected: _controller.packageNames,
       repository: _controller.repository,
+      archived: widget.archived,
       deleteApp: (app) async {
         await _controller.clear(packageName: app.packageName);
         if (mounted) {
@@ -96,6 +111,21 @@ class _HistoryScreenState extends State<HistoryScreen>
       },
     );
     if (selected != null && mounted) await _controller.setPackages(selected);
+  }
+
+  Future<bool> _archive(int id) async {
+    try {
+      await _controller.archive(id);
+      return true;
+    } catch (_) {
+      if (mounted) {
+        _toast(
+          tr(context, 'Не удалось переместить уведомление. Попробуйте снова.'),
+          error: true,
+        );
+      }
+      return false;
+    }
   }
 
   Future<bool> _delete(int id) async {
@@ -121,9 +151,22 @@ class _HistoryScreenState extends State<HistoryScreen>
       context,
       position,
       item.appName,
+      archived: widget.archived,
     );
     if (!mounted || action == null) return;
     switch (action) {
+      case NotificationAction.archive:
+        _actionInProgress = true;
+        try {
+          final feed = _feedKey.currentState;
+          if (feed != null) {
+            await feed.archiveNotification(item.id);
+          } else {
+            await _archive(item.id);
+          }
+        } finally {
+          _actionInProgress = false;
+        }
       case NotificationAction.delete:
         _actionInProgress = true;
         try {
@@ -137,7 +180,11 @@ class _HistoryScreenState extends State<HistoryScreen>
           _actionInProgress = false;
         }
       case NotificationAction.clearApp:
-        if (!await confirmClearHistory(context, appName: item.appName) ||
+        if (!await confirmClearHistory(
+              context,
+              appName: item.appName,
+              archived: widget.archived,
+            ) ||
             !mounted) {
           return;
         }
@@ -220,6 +267,7 @@ class _HistoryScreenState extends State<HistoryScreen>
                     listenable: _controller,
                     builder: (context, _) => HistoryActions(
                       search: _search,
+                      searchReset: _searchReset,
                       onSearchChanged: _controller.setSearch,
                       onFilter: _filter,
                       filterCount: _controller.packageNames.length,
@@ -250,15 +298,30 @@ class _HistoryScreenState extends State<HistoryScreen>
               scroll: _scroll,
               openSwipe: _openSwipe,
               onDelete: _delete,
+              onArchive: _archive,
+              onOpenArchive: widget.archived
+                  ? null
+                  : () async {
+                      await Navigator.of(context).push(
+                        AppPageRoute<void>(
+                          builder: (_) => HistoryScreen(
+                            repository: widget.repository,
+                            archived: true,
+                          ),
+                        ),
+                      );
+                      if (mounted) await _controller.refresh();
+                    },
               onLongPress: _notificationActions,
               onAccess: _access,
               onSettings: () => Navigator.of(context).push(
-                MaterialPageRoute<void>(
+                AppPageRoute<void>(
                   builder: (_) =>
                       SettingsScreen(historyRepository: widget.repository),
                 ),
               ),
               onResetFilters: () {
+                setState(() => _searchReset++);
                 _search.clear();
                 _controller.resetFilters();
               },

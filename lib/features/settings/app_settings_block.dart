@@ -1,3 +1,4 @@
+import 'package:noti_history/core/widgets/option_icon.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/l10n/app_strings.dart';
@@ -198,7 +199,7 @@ class _PreferenceOption extends StatelessWidget {
         ),
         child: Row(
           children: [
-            _settingIcon(context, icon),
+            OptionIcon(icon: icon, selected: selected),
             const SizedBox(width: 12),
             Expanded(
               child: Text(

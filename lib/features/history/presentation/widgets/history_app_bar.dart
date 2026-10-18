@@ -5,14 +5,22 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/theme/system_bars.dart';
 
 class HistoryAppBar extends StatelessWidget {
-  const HistoryAppBar({super.key, this.onSettings, this.onScrollToTop});
+  const HistoryAppBar({
+    super.key,
+    this.onSettings,
+    this.onScrollToTop,
+    this.archived = false,
+  });
   final VoidCallback? onSettings;
+  final bool archived;
   final VoidCallback? onScrollToTop;
 
   @override
   Widget build(BuildContext context) => SliverAppBar(
     pinned: true,
     toolbarHeight: 64,
+    titleSpacing: archived ? 0 : null,
+    leadingWidth: archived ? 48 : null,
     backgroundColor: ui(context).paper,
     surfaceTintColor: Colors.transparent,
     systemOverlayStyle: Theme.of(context).brightness == Brightness.dark
@@ -28,34 +36,36 @@ class HistoryAppBar extends StatelessWidget {
       ),
     ),
     actions: [
-      IconButton(
-        onPressed: onSettings,
-        tooltip: tr(context, 'Настройки'),
-        icon: Icon(Icons.settings_outlined),
-      ),
-      SizedBox(width: 8),
+      if (!archived)
+        IconButton(
+          onPressed: onSettings,
+          tooltip: tr(context, 'Настройки'),
+          icon: Icon(Icons.settings_outlined),
+        ),
+      if (!archived) SizedBox(width: 8),
     ],
     title: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onScrollToTop,
       child: Row(
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: accent,
-              borderRadius: BorderRadius.circular(14),
+          if (!archived)
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: accent,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                Icons.notifications_active_outlined,
+                color: Colors.white,
+                size: 24,
+              ),
             ),
-            child: Icon(
-              Icons.notifications_active_outlined,
-              color: Colors.white,
-              size: 24,
-            ),
-          ),
-          SizedBox(width: 10),
+          if (!archived) SizedBox(width: 10),
           Text(
-            'NotiHistory',
+            archived ? tr(context, 'Архив') : 'NotiHistory',
             style: TextStyle(
               fontFamily: titleFont,
               fontSize: 20,

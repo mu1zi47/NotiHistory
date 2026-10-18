@@ -9,9 +9,39 @@ import 'package:noti_history/features/settings/capture_app_actions.dart';
 
 import 'support/memory_repository.dart';
 
+import 'package:noti_history/features/settings/feedback_block.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('notihistory/history');
+  testWidgets('Feedback opens email and contacts destinations', (tester) async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: buildAppTheme(),
+        home: const Scaffold(body: FeedbackBlock()),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('feedback-email')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('feedback-telegram')));
+    await tester.pump();
+    expect(calls.map((call) => call.method), ['openFeedback', 'openFeedback']);
+    expect(calls.map((call) => (call.arguments as Map)['destination']), [
+      'email',
+      'telegram',
+    ]);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('Search, persist selection, reopen and failed save', (
     tester,
   ) async {
@@ -57,10 +87,10 @@ void main() {
     }
 
     await open();
-    expect(find.byType(TextField), findsNothing);
+    expect(find.byType(TextField).hitTestable(), findsNothing);
     await tester.tap(find.text('Сохранение уведомлений'));
     await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsNothing);
+    expect(find.byType(TextField).hitTestable(), findsNothing);
     await tester.tap(find.byTooltip('Поиск'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField), 'TELE');
@@ -87,7 +117,7 @@ void main() {
     await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.text('Настройки'), findsOneWidget);
-    expect(find.byType(TextField), findsNothing);
+    expect(find.byType(TextField).hitTestable(), findsNothing);
   });
   testWidgets(
     'Scrollable apps and compact bottom search and enable-all actions',
@@ -135,7 +165,13 @@ void main() {
         closeTo(tester.getTopLeft(secondApp).dy, .1),
       );
       expect(
-        tester.widget<Material>(firstApp).borderRadius,
+        tester
+            .widget<Material>(
+              find
+                  .descendant(of: firstApp, matching: find.byType(Material))
+                  .first,
+            )
+            .borderRadius,
         const BorderRadius.vertical(top: Radius.circular(20)),
       );
       final decoration = tester
@@ -192,12 +228,15 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Закрыть поиск'));
       await tester.pumpAndSettle();
-      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(TextField).hitTestable(), findsNothing);
       expect(
         tester.getSize(find.byTooltip('Включить все')).width,
         lessThan(200),
       );
       await tester.tap(find.text('Включить все'));
+      await tester.pumpAndSettle();
+      expect(enabled['app0'], false);
+      await tester.tap(find.widgetWithText(FilledButton, 'Включить все'));
       await tester.pumpAndSettle();
       expect(enabled['app0'], false);
       expect(
@@ -206,6 +245,9 @@ void main() {
       );
       fail = false;
       await tester.tap(find.text('Включить все'));
+      await tester.pumpAndSettle();
+      expect(enabled['app0'], false);
+      await tester.tap(find.widgetWithText(FilledButton, 'Включить все'));
       await tester.pumpAndSettle();
       expect(enabled.values.every((value) => value), true);
       expect(find.text('Включить все'), findsNothing);
@@ -327,7 +369,15 @@ void main() {
     await tester.tap(find.byTooltip('Закрыть поиск'));
     await tester.pumpAndSettle();
     expect(find.text('Alpha'), findsNothing);
+    final betaRow = find.byKey(const ValueKey('capture-app-beta'));
+    final betaHeight = tester.getSize(betaRow).height;
     await tester.tap(find.byType(Switch).first);
+    await tester.pump();
+    expect(enabled['Beta'], true);
+    expect(find.text('Beta'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 140));
+    expect(tester.getSize(betaRow).height, greaterThan(0));
+    expect(tester.getSize(betaRow).height, lessThan(betaHeight));
     await tester.pumpAndSettle();
     expect(enabled['Beta'], true);
     expect(find.text('Beta'), findsNothing);
@@ -338,6 +388,13 @@ void main() {
     expect(find.text('Delta'), findsNothing);
     await filter('disabled');
     await tester.tap(find.byTooltip('Включить все'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Отмена'));
+    await tester.pumpAndSettle();
+    expect(enabled['Delta'], false);
+    await tester.tap(find.byTooltip('Включить все'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Включить все'));
     await tester.pumpAndSettle();
     expect(find.text('Нет выключенных приложений'), findsOneWidget);
     expect(find.byTooltip('Включить все'), findsNothing);

@@ -6,13 +6,14 @@ import 'package:flutter/material.dart';
 
 import '../../../core/theme/app_theme.dart';
 
-enum NotificationAction { delete, clearApp, disableApp }
+enum NotificationAction { archive, delete, clearApp, disableApp }
 
 Future<NotificationAction?> showNotificationActionsMenu(
   BuildContext context,
   Offset position,
-  String appName,
-) => showGeneralDialog<NotificationAction>(
+  String appName, {
+  bool archived = false,
+}) => showGeneralDialog<NotificationAction>(
   context: context,
   barrierDismissible: true,
   barrierLabel: tr(context, 'Закрыть меню'),
@@ -24,7 +25,7 @@ Future<NotificationAction?> showNotificationActionsMenu(
     final screen = MediaQuery.sizeOf(context);
     final safe = MediaQuery.paddingOf(context);
     final width = math.min(326.0, screen.width - 24);
-    final height = math.min(310.0, screen.height - safe.top - safe.bottom - 24);
+    final height = math.min(390.0, screen.height - safe.top - safe.bottom - 24);
     final left = (position.dx - width + 24).clamp(
       12.0,
       screen.width - width - 12,
@@ -130,6 +131,22 @@ Future<NotificationAction?> showNotificationActionsMenu(
                       ),
                     ),
                     action(
+                      NotificationAction.archive,
+                      archived
+                          ? Icons.unarchive_outlined
+                          : Icons.archive_outlined,
+                      tr(
+                        context,
+                        archived ? 'Вернуть из архива' : 'Архивировать',
+                      ),
+                      tr(
+                        context,
+                        archived
+                            ? 'Показать на главном экране'
+                            : 'Сохранить отдельно от основной истории',
+                      ),
+                    ),
+                    action(
                       NotificationAction.delete,
                       Icons.delete_outline_rounded,
                       tr(context, 'Удалить уведомление'),
@@ -140,7 +157,7 @@ Future<NotificationAction?> showNotificationActionsMenu(
                       NotificationAction.clearApp,
                       Icons.delete_sweep_outlined,
                       tr(context, 'Удалить все уведомления'),
-                      tr(context, 'Вся история этого приложения'),
+                      tr(context, 'Уведомления приложения на этом экране'),
                       destructive: true,
                     ),
                     action(

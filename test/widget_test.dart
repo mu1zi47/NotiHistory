@@ -25,6 +25,154 @@ void main() {
       ..addFont(rootBundle.load('assets/fonts/Manrope-ExtraBold.ttf'));
     await Future.wait([titles.load(), body.load()]);
   });
+  testWidgets(
+    'Archive and delete icons have mirrored positions throughout a swipe',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(_russianApp(repository: MemoryRepository()));
+      await tester.pumpAndSettle();
+      final rightRow = find.byKey(const ValueKey('swipe-2'));
+      final leftRow = find.byKey(const ValueKey('swipe-1'));
+      final rightBounds = tester.getRect(rightRow);
+      final leftBounds = tester.getRect(leftRow);
+      final right = await tester.startGesture(
+        tester.getCenter(rightRow),
+        pointer: 1,
+      );
+      final left = await tester.startGesture(
+        tester.getCenter(leftRow),
+        pointer: 2,
+      );
+      Future<void> move(double distance) async {
+        await right.moveBy(Offset(distance, 0));
+        await left.moveBy(Offset(-distance, 0));
+        await tester.pump();
+      }
+
+      void mirrored() {
+        final archive = find.descendant(
+          of: rightRow,
+          matching: find.byIcon(Icons.archive_outlined),
+        );
+        final trash = find.descendant(
+          of: leftRow,
+          matching: find.byIcon(Icons.delete_outline_rounded),
+        );
+        expect(
+          tester.getCenter(archive).dx - rightBounds.left,
+          closeTo(leftBounds.right - tester.getCenter(trash).dx, .01),
+        );
+      }
+
+      await move(70);
+      mirrored();
+      await move(30);
+      await tester.pump(const Duration(milliseconds: 40));
+      mirrored();
+      await move(140);
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 40));
+        mirrored();
+      }
+      await move(-140);
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 40));
+        mirrored();
+      }
+      await right.cancel();
+      await left.cancel();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'Archive survives main clear, supports menu archive and restoration',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final repo = MemoryRepository();
+      await tester.pumpWidget(_russianApp(repository: repo));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('open-archive')), findsNothing);
+      await tester.longPress(find.byKey(const ValueKey('swipe-2')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('notification-action-archive')),
+      );
+      await tester.pumpAndSettle();
+      expect(repo.archivedIds, {2});
+      expect(find.text('Аня'), findsNothing);
+      await tester.tap(find.byTooltip('Очистить всё'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Удалить всё'));
+      await tester.pumpAndSettle();
+      expect(repo.entries.single.id, 2);
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('open-archive')));
+      await tester.pumpAndSettle();
+      expect(find.text('Аня'), findsOneWidget);
+      expect(find.byIcon(Icons.settings_outlined), findsNothing);
+      expect(find.byIcon(Icons.notifications_active_outlined), findsNothing);
+      final archiveBar = tester.widget<SliverAppBar>(find.byType(SliverAppBar));
+      expect(archiveBar.titleSpacing, 0);
+      expect(archiveBar.leadingWidth, 48);
+      // Free space navigates back, notification rows retain their swipe action.
+      await tester.timedDragFrom(
+        const Offset(180, 700),
+        const Offset(220, 0),
+        const Duration(milliseconds: 600),
+      );
+      await tester.pumpAndSettle();
+      expect(repo.archivedIds, {2});
+      expect(find.byKey(const ValueKey('open-archive')), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(find.byKey(const ValueKey('open-archive')))
+            .style,
+        isNull,
+      );
+      await tester.tap(find.byKey(const ValueKey('open-archive')));
+      await tester.pumpAndSettle();
+      await tester.timedDrag(
+        find.byKey(const ValueKey('swipe-2')),
+        const Offset(210, 0),
+        const Duration(milliseconds: 450),
+      );
+      await tester.pumpAndSettle();
+      expect(repo.archivedIds, isEmpty);
+      expect(find.text('Архив пуст'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('open-archive')), findsNothing);
+      expect(find.text('Аня'), findsOneWidget);
+      await tester.timedDrag(
+        find.byKey(const ValueKey('swipe-2')),
+        const Offset(210, 0),
+        const Duration(milliseconds: 450),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('open-archive')));
+      await tester.pumpAndSettle();
+      await tester.timedDrag(
+        find.byKey(const ValueKey('swipe-2')),
+        const Offset(-210, 0),
+        const Duration(milliseconds: 450),
+      );
+      await tester.pumpAndSettle();
+      expect(repo.entries, isEmpty);
+      expect(find.text('Архив пуст'), findsOneWidget);
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('open-archive')), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('Search, application filtering and full text work', (
     tester,
   ) async {
@@ -107,7 +255,7 @@ void main() {
       find.byKey(const ValueKey('swipe-delete-background-2')),
       findsOneWidget,
     );
-    expect(tester.getTopLeft(find.text('Аня')).dx, greaterThan(originalX));
+    expect(tester.getTopLeft(find.text('Аня')).dx, lessThan(originalX));
     await tester.pumpAndSettle();
     expect(repo.entries.single.packageName, 'com.mail');
     expect(find.text('Билеты'), findsOneWidget);
@@ -354,10 +502,13 @@ void main() {
       find.byKey(const ValueKey('history-sheet-viewport')),
       findsOneWidget,
     );
-    expect(tester.widget<Icon>(find.byIcon(Icons.apps_rounded)).color, accent);
+    expect(
+      tester.widget<Icon>(find.byIcon(Icons.apps_rounded)).color,
+      Colors.white,
+    );
     await tester.tap(find.byKey(const ValueKey('filter-option-org.telegram')));
     await tester.pump();
-    expect(tester.widget<Icon>(find.byIcon(Icons.apps_rounded)).color, ink);
+    expect(tester.widget<Icon>(find.byIcon(Icons.apps_rounded)).color, accent);
     await tester.tap(find.byKey(const ValueKey('filter-option-com.mail')));
     await tester.pump();
     expect(find.text('Применить · 2'), findsOneWidget);
@@ -528,100 +679,107 @@ void main() {
     );
     await secondGesture.up();
     await tester.pumpAndSettle();
-    expect(repo.entries, isEmpty);
+    expect(repo.entries.single.id, 1);
+    expect(repo.archivedIds, {1});
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets(
-    'Short swipes reset and longer swipes immediately delete in both directions',
-    (tester) async {
-      tester.view.physicalSize = const Size(430, 1000);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final repo = MemoryRepository();
-      await tester.pumpWidget(_russianApp(repository: repo));
-      await tester.pumpAndSettle();
+  testWidgets('Short swipes reset, left deletes and right archives', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repo = MemoryRepository();
+    await tester.pumpWidget(_russianApp(repository: repo));
+    await tester.pumpAndSettle();
 
-      final first = find.ancestor(
-        of: find.text('Аня'),
-        matching: find.byType(SwipeNotificationCard),
+    final first = find.ancestor(
+      of: find.text('Аня'),
+      matching: find.byType(SwipeNotificationCard),
+    );
+    for (final distance in [-70.0, 70.0]) {
+      final gesture = await tester.startGesture(tester.getCenter(first));
+      await gesture.moveBy(Offset(distance, 0));
+      await tester.pump();
+      final background = find.byKey(
+        const ValueKey('swipe-delete-background-2'),
       );
-      for (final distance in [-70.0, 70.0]) {
-        final gesture = await tester.startGesture(tester.getCenter(first));
-        await gesture.moveBy(Offset(distance, 0));
-        await tester.pump();
-        final background = find.byKey(
-          const ValueKey('swipe-delete-background-2'),
-        );
-        expect(background, findsOneWidget);
-        expect(
-          tester.widget<ColoredBox>(background).color,
-          const Color(0xFFFBEAEC),
-        );
-        expect(
-          find.descendant(
-            of: background,
-            matching: find.byIcon(Icons.delete_outline_rounded),
+      expect(background, findsOneWidget);
+      expect(
+        tester.widget<ColoredBox>(background).color,
+        distance < 0 ? const Color(0xFFFBEAEC) : accentSurface,
+      );
+      expect(
+        find.descendant(
+          of: background,
+          matching: find.byIcon(
+            distance < 0
+                ? Icons.delete_outline_rounded
+                : Icons.archive_outlined,
           ),
-          findsOneWidget,
-        );
-        final card = tester.widget<NotificationCard>(
-          find.descendant(of: first, matching: find.byType(NotificationCard)),
-        );
-        expect(card.showTopBorder, isFalse);
-        expect(card.showBottomBorder, isTrue);
-        final iconPosition = find.byKey(
-          const ValueKey('swipe-delete-icon-position-2'),
-        );
-        expect(
-          tester.widget<AnimatedAlign>(iconPosition).alignment,
-          distance < 0 ? Alignment.centerRight : Alignment.centerLeft,
-        );
-        await gesture.moveBy(Offset(distance.sign * 160, 0));
-        await tester.pump(const Duration(milliseconds: 200));
-        expect(
-          tester.widget<AnimatedAlign>(iconPosition).alignment,
-          Alignment.center,
-        );
-        await gesture.moveBy(Offset(-distance.sign * 160, 0));
-        await tester.pump(const Duration(milliseconds: 200));
-        await gesture.cancel();
-        await tester.pumpAndSettle();
-        expect(background, findsNothing);
-        expect(repo.entries.length, 2);
-      }
-      await tester.timedDrag(
-        first,
-        const Offset(-20, 0),
-        const Duration(milliseconds: 300),
+        ),
+        findsOneWidget,
       );
+      final card = tester.widget<NotificationCard>(
+        find.descendant(of: first, matching: find.byType(NotificationCard)),
+      );
+      expect(card.showTopBorder, isFalse);
+      expect(card.showBottomBorder, isTrue);
+      final iconPosition = find.byKey(
+        const ValueKey('swipe-delete-icon-position-2'),
+      );
+      final region = find.byKey(const ValueKey('swipe-action-region-2'));
+      expect(
+        tester.widget<Positioned>(iconPosition).left,
+        closeTo(distance < 0 ? tester.getSize(region).width - 48 : 20, .1),
+      );
+      await gesture.moveBy(Offset(distance.sign * 160, 0));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        tester.widget<Positioned>(iconPosition).left,
+        closeTo((tester.getSize(region).width - 28) / 2, .1),
+      );
+      await gesture.moveBy(Offset(-distance.sign * 160, 0));
+      await tester.pump(const Duration(milliseconds: 200));
+      await gesture.cancel();
       await tester.pumpAndSettle();
+      expect(background, findsNothing);
       expect(repo.entries.length, 2);
-      expect(find.text('Удалить'), findsNothing);
-      await tester.timedDrag(
-        first,
-        const Offset(-150, 0),
-        const Duration(milliseconds: 350),
-      );
-      await tester.pumpAndSettle();
-      expect(repo.entries.map((entry) => entry.id), [1]);
-      expect(find.text('Аня'), findsNothing);
+    }
+    await tester.timedDrag(
+      first,
+      const Offset(-20, 0),
+      const Duration(milliseconds: 300),
+    );
+    await tester.pumpAndSettle();
+    expect(repo.entries.length, 2);
+    expect(find.text('Удалить'), findsNothing);
+    await tester.timedDrag(
+      first,
+      const Offset(-150, 0),
+      const Duration(milliseconds: 350),
+    );
+    await tester.pumpAndSettle();
+    expect(repo.entries.map((entry) => entry.id), [1]);
+    expect(find.text('Аня'), findsNothing);
 
-      final second = find.ancestor(
-        of: find.text('Билеты'),
-        matching: find.byType(SwipeNotificationCard),
-      );
-      await tester.timedDrag(
-        second,
-        const Offset(210, 0),
-        const Duration(milliseconds: 450),
-      );
-      await tester.pumpAndSettle();
-      expect(repo.entries, isEmpty);
-      expect(find.text('Билеты'), findsNothing);
-    },
-  );
+    final second = find.ancestor(
+      of: find.text('Билеты'),
+      matching: find.byType(SwipeNotificationCard),
+    );
+    await tester.timedDrag(
+      second,
+      const Offset(210, 0),
+      const Duration(milliseconds: 450),
+    );
+    await tester.pumpAndSettle();
+    expect(repo.entries.single.id, 1);
+    expect(repo.archivedIds, {1});
+    expect(find.text('Билеты'), findsNothing);
+  });
 
   testWidgets('Custom pull refresh lowers the feed and returns after loading', (
     tester,
@@ -981,6 +1139,7 @@ class FailingAppClearRepository extends MemoryRepository {
     String search = '',
     Set<String> packageNames = const {},
     int since = 0,
+    bool archived = false,
   }) async {
     if (fail) throw StateError('Storage unavailable');
     await super.clear(search: search, packageNames: packageNames, since: since);

@@ -8,11 +8,13 @@ class HistoryEmpty extends StatelessWidget {
   const HistoryEmpty({
     super.key,
     required this.filtered,
+    this.archived = false,
     required this.status,
     required this.onAccess,
     required this.onReset,
   });
   final bool filtered;
+  final bool archived;
   final CaptureStatus status;
   final VoidCallback onAccess;
   final VoidCallback onReset;
@@ -21,12 +23,22 @@ class HistoryEmpty extends StatelessWidget {
     return AppEmptyState(
       icon: filtered
           ? Icons.search_off_rounded
+          : archived
+          ? Icons.archive_outlined
           : Icons.mark_email_read_outlined,
       title: filtered
           ? tr(context, 'Ничего не нашлось')
-          : tr(context, 'Здесь начнётся ваша история'),
+          : tr(
+              context,
+              archived ? 'Архив пуст' : 'Здесь начнётся ваша история',
+            ),
       message: filtered
           ? tr(context, 'Попробуйте другой запрос или сбросьте фильтры.')
+          : archived
+          ? tr(
+              context,
+              'Смахните уведомление вправо, чтобы сохранить его в архиве.',
+            )
           : status.active
           ? tr(context, 'Следующее уведомление появится здесь.')
           : tr(
@@ -34,7 +46,7 @@ class HistoryEmpty extends StatelessWidget {
               'Разрешите доступ — и новые уведомления будут сохраняться автоматически.',
             ),
       actions: [
-        if (!status.active && status.supported) ...[
+        if (!archived && !status.active && status.supported) ...[
           SizedBox(height: 16),
           FilledButton(
             onPressed: onAccess,

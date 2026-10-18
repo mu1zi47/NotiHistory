@@ -12,6 +12,33 @@ import 'package:noti_history/core/theme/app_theme.dart';
 import 'support/memory_repository.dart';
 
 void main() {
+  late Map<String, dynamic> stored;
+  testWidgets('Saved light theme is used in the first frame on a dark device', (
+    tester,
+  ) async {
+    tester.platformDispatcher.platformBrightnessTestValue = Brightness.dark;
+    addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+    stored = {'language': 'ru', 'theme': 'light'};
+    final preferences = AppPreferences();
+    addTearDown(preferences.dispose);
+    await preferences.load();
+    await tester.pumpWidget(
+      NotiHistoryApp(
+        preferences: preferences,
+        preferencesLoaded: true,
+        repository: MemoryRepository(),
+      ),
+    );
+    expect(
+      tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode,
+      ThemeMode.light,
+    );
+    expect(
+      Theme.of(tester.element(find.byType(Scaffold).first)).brightness,
+      Brightness.light,
+    );
+    await tester.pumpAndSettle();
+  });
   setUpAll(() async {
     final headings = FontLoader(titleFont)
       ..addFont(rootBundle.load('assets/fonts/Exo2.ttf'));
@@ -24,7 +51,6 @@ void main() {
     await Future.wait([headings.load(), body.load(), icons.load()]);
   });
   const channel = MethodChannel('notihistory/history');
-  late Map<String, dynamic> stored;
   setUp(() {
     stored = {};
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

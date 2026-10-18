@@ -1,3 +1,4 @@
+import 'package:noti_history/core/widgets/option_icon.dart';
 import 'package:noti_history/core/l10n/app_strings.dart';
 import 'package:flutter/material.dart';
 
@@ -20,99 +21,70 @@ class _PeriodPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => HistorySheet(
-    children: [
-      Row(
-        children: [
-          Expanded(
-            child: Center(
-              child: Text(
-                tr(context, 'Период уведомлений'),
-                style: TextStyle(
-                  fontFamily: titleFont,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
-        ],
+    header: Center(
+      child: Text(
+        tr(context, 'Период уведомлений'),
+        style: const TextStyle(
+          fontFamily: titleFont,
+          fontSize: 18,
+          fontWeight: FontWeight.w700,
+        ),
       ),
-      SizedBox(height: 24),
-      for (var index = 0; index < periodLabels.length; index++)
-        Padding(
-          padding: EdgeInsets.only(
-            bottom: index == periodLabels.length - 1 ? 0 : 8,
-          ),
-          child: Semantics(
-            selected: selected == index,
-            button: true,
-            child: Material(
-              color: selected == index
-                  ? ui(context).accentSurface
-                  : ui(context).surface,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-                side: BorderSide(
-                  color: selected == index
-                      ? ui(context).accent.withValues(alpha: .5)
-                      : ui(context).divider,
-                ),
-              ),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(20),
-                onTap: () => Navigator.pop(context, index),
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          color: selected == index
-                              ? ui(context).accent
-                              : ui(context).paper,
-                          borderRadius: BorderRadius.circular(14),
+    ),
+    children: [
+      Material(
+        color: ui(context).surface,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var index = 0; index < periodLabels.length; index++) ...[
+              if (index > 0)
+                Divider(height: 1, thickness: 1, color: ui(context).divider),
+              Semantics(
+                selected: selected == index,
+                button: true,
+                child: InkWell(
+                  onTap: () => Navigator.pop(context, index),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        OptionIcon(
+                          icon: _icons[index],
+                          selected: selected == index,
                         ),
-                        child: Icon(
-                          _icons[index],
-                          color: selected == index
-                              ? ui(context).paper
-                              : ui(context).muted,
-                          size: 24,
-                        ),
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              tr(context, periodLabels[index]),
-                              style: TextStyle(
-                                fontFamily: titleFont,
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            tr(context, periodLabels[index]),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: selected == index
+                                  ? ui(context).accent
+                                  : ui(context).ink,
                             ),
-                          ],
+                          ),
                         ),
-                      ),
-                      SizedBox(width: 8),
-                      Icon(
-                        selected == index ? Icons.check_rounded : null,
-                        size: 24,
-                        color: selected == index
-                            ? ui(context).accent
-                            : ui(context).divider,
-                      ),
-                    ],
+                        if (selected == index)
+                          Icon(
+                            Icons.check_rounded,
+                            color: ui(context).accent,
+                            size: 22,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
+            ],
+          ],
         ),
+      ),
     ],
   );
 }

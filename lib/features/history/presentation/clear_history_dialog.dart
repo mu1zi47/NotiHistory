@@ -7,6 +7,7 @@ import 'widgets/history_sheet.dart';
 Future<bool> confirmClearHistory(
   BuildContext context, {
   bool filtered = false,
+  bool archived = false,
   String? appName,
   bool waitForDismiss = false,
 }) async =>
@@ -18,10 +19,18 @@ Future<bool> confirmClearHistory(
           Center(
             child: Text(
               appName != null
-                  ? tr(context, 'Удалить уведомления приложения?')
+                  ? tr(
+                      context,
+                      archived
+                          ? 'Удалить уведомления приложения из архива?'
+                          : 'Удалить уведомления приложения?',
+                    )
                   : filtered
                   ? tr(context, 'Очистить по фильтру?')
-                  : tr(context, 'Очистить всю историю?'),
+                  : tr(
+                      context,
+                      archived ? 'Очистить архив?' : 'Очистить всю историю?',
+                    ),
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontFamily: titleFont,
@@ -35,7 +44,9 @@ Future<bool> confirmClearHistory(
             appName != null
                 ? tr(
                     context,
-                    'Все сохранённые уведомления от «{0}» будут удалены. Вернуть их не получится.',
+                    archived
+                        ? 'Все уведомления от «{0}» в архиве будут удалены. Вернуть их не получится.'
+                        : 'Уведомления от «{0}» на главном экране будут удалены. Архив сохранится.',
                     [appName],
                   )
                 : filtered
@@ -45,7 +56,9 @@ Future<bool> confirmClearHistory(
                   )
                 : tr(
                     context,
-                    'Все сохранённые уведомления будут удалены с телефона. Вернуть их не получится. Новые уведомления продолжат сохраняться.',
+                    archived
+                        ? 'Все уведомления в архиве будут удалены. Вернуть их не получится.'
+                        : 'Уведомления на главном экране будут удалены. Архив сохранится. Вернуть удалённые уведомления не получится.',
                   ),
             style: TextStyle(
               color: ui(context).muted,

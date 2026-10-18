@@ -8,6 +8,7 @@ import 'capture_app_filter.dart';
 class CaptureAppActions extends StatefulWidget {
   const CaptureAppActions({
     super.key,
+    this.searchReset = 0,
     required this.search,
     required this.onSearchChanged,
     required this.hasDisabled,
@@ -16,6 +17,7 @@ class CaptureAppActions extends StatefulWidget {
     this.filter = CaptureAppFilter.all,
     this.onFilter,
   });
+  final int searchReset;
   final TextEditingController search;
   final ValueChanged<String> onSearchChanged;
   final bool hasDisabled, busy;
@@ -34,7 +36,7 @@ class _CaptureAppActionsState extends State<CaptureAppActions> {
   void _openSearch() {
     setState(() => _searching = true);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focus.requestFocus();
+      if (mounted && _searching) _focus.requestFocus();
     });
   }
 
@@ -43,6 +45,15 @@ class _CaptureAppActionsState extends State<CaptureAppActions> {
     widget.search.clear();
     widget.onSearchChanged('');
     setState(() => _searching = false);
+  }
+
+  @override
+  void didUpdateWidget(CaptureAppActions oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.searchReset != widget.searchReset) {
+      _focus.unfocus();
+      _searching = false;
+    }
   }
 
   @override

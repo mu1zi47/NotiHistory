@@ -14,6 +14,7 @@ abstract interface class HistoryRepository {
     int since = 0,
     int? beforeId,
     bool includeOverview = true,
+    bool archived = false,
   });
   Future<void> openAccess();
   Future<void> openNotification(int id, {String packageName = ''});
@@ -23,8 +24,10 @@ abstract interface class HistoryRepository {
     String search = '',
     Set<String> packageNames = const <String>{},
     int since = 0,
+    bool archived = false,
   });
   Future<void> delete(int id);
+  Future<void> setArchived(int id, bool archived);
   Future<SavedNotification?> notification(int id);
   Future<Uint8List?> image(int id);
   Future<Uint8List?> icon(String packageName);

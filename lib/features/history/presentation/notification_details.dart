@@ -55,7 +55,7 @@ class _NotificationDetailsState extends State<_NotificationDetails>
       (_) => _checkAvailability(refreshContent: true),
       onError: (_) {},
     );
-    _checkAvailability();
+    _checkAvailability(refreshContent: true);
   }
 
   Future<void> _checkAvailability({bool refreshContent = false}) async {
@@ -78,7 +78,9 @@ class _NotificationDetailsState extends State<_NotificationDetails>
     if (mounted && generation == _checkGeneration) {
       setState(() {
         _available = available;
-        if (updated != null) item = updated;
+        if (updated != null && updated.packageName == item.packageName) {
+          item = updated;
+        }
       });
     }
   }
@@ -204,18 +206,36 @@ class _NotificationDetailsState extends State<_NotificationDetails>
       ],
     ),
     children: [
-      SelectableText(
-        item.body.isEmpty
-            ? tr(context, 'Android не передал текст этого уведомления.')
-            : item.body.replaceAll(RegExp(r'\n(?=[^\n:]{1,80}: )'), '\n\n'),
-        textAlign: TextAlign.left,
-        style: TextStyle(
-          fontFamily: bodyFont,
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          height: 1.5,
+      for (
+        var index = 0;
+        index < (item.messages.isEmpty ? 1 : item.messages.length);
+        index++
+      ) ...[
+        if (index > 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Divider(
+              key: ValueKey('message-divider-$index'),
+              height: 1,
+              thickness: 1,
+              color: ui(context).divider,
+            ),
+          ),
+        SelectableText(
+          item.messages.isNotEmpty
+              ? item.messages[index]
+              : item.body.isEmpty
+              ? tr(context, 'Android не передал текст этого уведомления.')
+              : item.body,
+          textAlign: TextAlign.left,
+          style: const TextStyle(
+            fontFamily: bodyFont,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            height: 1.5,
+          ),
         ),
-      ),
+      ],
       if (item.hasImage) NotificationImage(item: item, repository: repository),
     ],
   );

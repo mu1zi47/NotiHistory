@@ -13,12 +13,16 @@ class SwipeNotificationHandle {
   _SwipeNotificationCardState? _state;
   bool get attached => _state?.mounted == true;
   Future<void> delete() async {
-    await _state?._delete(1);
+    await _state?._delete(-1);
+  }
+
+  Future<void> archive() async {
+    await _state?._archive();
   }
 
   Future<void> animateOut(Duration delay) async {
     if (delay > Duration.zero) await Future<void>.delayed(delay);
-    await _state?._animateOut(1);
+    await _state?._animateOut(-1);
   }
 
   Future<void> restore() async {
@@ -35,6 +39,8 @@ class SwipeNotificationCard extends StatefulWidget {
     required this.onTap,
     required this.onDelete,
     this.onLongPress,
+    this.onArchive,
+    this.archived = false,
     this.removal,
     this.borderRadius = BorderRadius.zero,
     this.showTopBorder = true,
@@ -47,6 +53,8 @@ class SwipeNotificationCard extends StatefulWidget {
   final ValueNotifier<int?> openItem;
   final VoidCallback onTap;
   final Future<bool> Function() onDelete;
+  final Future<bool> Function()? onArchive;
+  final bool archived;
   final ValueChanged<Offset>? onLongPress;
   final SwipeNotificationHandle? removal;
   final BorderRadius borderRadius;
@@ -140,7 +148,11 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
         (offset.abs() >= _width * .16 && velocity.abs() >= 900);
     _armed = false;
     if (fullSwipe) {
-      _delete(direction);
+      if (direction > 0 && widget.onArchive != null) {
+        _archive();
+      } else {
+        _delete(direction);
+      }
     } else {
       widget.openItem.value = null;
       _settle(0);
@@ -188,6 +200,15 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
     _deleting = false;
     _slide.value = 0;
     await _collapse.animateTo(1, curve: Curves.easeOutCubic);
+  }
+
+  Future<void> _archive() async {
+    if (_deleting || widget.onArchive == null) return;
+    HapticFeedback.mediumImpact();
+    final commit = widget.onArchive!;
+    await _animateOut(1);
+    final archived = await commit();
+    if (!archived && mounted) await _restore();
   }
 
   Future<void> _delete(double direction) async {
@@ -239,45 +260,95 @@ class _SwipeNotificationCardState extends State<SwipeNotificationCard>
                             key: ValueKey(
                               'swipe-delete-background-${widget.item.id}',
                             ),
-                            color: ui(context).deleteSurface,
+                            color: _slide.value > 0 && widget.onArchive != null
+                                ? ui(context).accentSurface
+                                : ui(context).deleteSurface,
                             child: Align(
                               alignment: _slide.value > 0
                                   ? Alignment.centerLeft
                                   : Alignment.centerRight,
                               child: SizedBox(
+                                key: ValueKey(
+                                  'swipe-action-region-${widget.item.id}',
+                                ),
                                 width: _slide.value.abs().clamp(0.0, _width),
                                 height: double.infinity,
-                                child: AnimatedAlign(
-                                  key: ValueKey(
-                                    'swipe-delete-icon-position-${widget.item.id}',
-                                  ),
-                                  duration: Duration(milliseconds: 180),
-                                  curve: Curves.easeOutCubic,
-                                  alignment: _slide.value.abs() >= _width * .5
-                                      ? Alignment.center
-                                      : _slide.value > 0
-                                      ? Alignment.centerLeft
-                                      : Alignment.centerRight,
-                                  child: Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 20,
-                                    ),
-                                    child: Opacity(
-                                      opacity: (_slide.value.abs() / 64).clamp(
-                                        0.0,
-                                        1.0,
+                                child: LayoutBuilder(
+                                  builder: (context, exposed) {
+                                    final width = exposed.maxWidth;
+                                    final centered =
+                                        _slide.value.abs() >= _width * .5;
+                                    final archive =
+                                        _slide.value > 0 &&
+                                        widget.onArchive != null;
+                                    return TweenAnimationBuilder<double>(
+                                      tween: Tween(
+                                        begin: 0,
+                                        end: centered ? 1 : 0,
                                       ),
-                                      child: Icon(
-                                        Icons.delete_outline_rounded,
-                                        color: ui(context).deleteInk,
-                                        size: 28,
-                                        semanticLabel: tr(
-                                          context,
-                                          'Удалить уведомление',
-                                        ),
+                                      duration: const Duration(
+                                        milliseconds: 180,
                                       ),
-                                    ),
-                                  ),
+                                      curve: Curves.easeOutCubic,
+                                      builder: (context, progress, child) {
+                                        // Animate distance from the outer edge, then mirror
+                                        // the finished geometry. Never animate a width-dependent
+                                        // absolute x coordinate: that lags only on the left swipe.
+                                        final maxInset = (width - 28).clamp(
+                                          0.0,
+                                          width,
+                                        );
+                                        final edge = 20.0.clamp(0.0, maxInset);
+                                        final center = maxInset / 2;
+                                        final inset =
+                                            edge + (center - edge) * progress;
+                                        final left = _slide.value > 0
+                                            ? inset
+                                            : maxInset - inset;
+                                        return Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            Positioned(
+                                              key: ValueKey(
+                                                'swipe-delete-icon-position-${widget.item.id}',
+                                              ),
+                                              left: left,
+                                              top: 0,
+                                              bottom: 0,
+                                              width: 28,
+                                              child: Opacity(
+                                                opacity:
+                                                    (_slide.value.abs() / 64)
+                                                        .clamp(0.0, 1.0),
+                                                child: Icon(
+                                                  archive
+                                                      ? (widget.archived
+                                                            ? Icons
+                                                                  .unarchive_outlined
+                                                            : Icons
+                                                                  .archive_outlined)
+                                                      : Icons
+                                                            .delete_outline_rounded,
+                                                  color: archive
+                                                      ? ui(context).accent
+                                                      : ui(context).deleteInk,
+                                                  size: 28,
+                                                  semanticLabel: tr(
+                                                    context,
+                                                    archive
+                                                        ? (widget.archived
+                                                              ? 'Вернуть из архива'
+                                                              : 'Архивировать')
+                                                        : 'Удалить уведомление',
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    );
+                                  },
                                 ),
                               ),
                             ),
